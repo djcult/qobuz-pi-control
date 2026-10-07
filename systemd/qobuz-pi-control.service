@@ -1,0 +1,15 @@
+[Unit]
+Description=Qobuz Pi physical controls
+After=network-online.target qobuz-proxy.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/opt/qobuz-pi-control
+ExecStart=/opt/qobuz-pi-control/.venv/bin/qobuz-pi-control --config /opt/qobuz-pi-control/config.toml
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
