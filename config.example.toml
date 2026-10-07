@@ -1,0 +1,19 @@
+[qobuz_proxy]
+base_url = "http://127.0.0.1:8689"
+speaker_id = "cdq2"
+timeout_seconds = 2.0
+
+[flirc]
+enabled = true
+device = "auto"
+grab = false
+play_pause = "KEY_F13"
+next = "KEY_F14"
+previous = "KEY_F15"
+play = "KEY_F16"
+pause = "KEY_F17"
+
+[streamdeck]
+enabled = true
+device = "auto"
+brightness = 35
