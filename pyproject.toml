@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "qobuz-pi-control"
+version = "0.1.0"
+description = "Physical controls for qobuz-proxy on Raspberry Pi"
+requires-python = ">=3.11"
+dependencies = [
+  "aiohttp>=3.9",
+  "evdev>=1.7",
+]
+
+[project.optional-dependencies]
+streamdeck = [
+  "streamdeck>=0.9",
+  "pillow>=10",
+]
+dev = [
+  "pytest>=8",
+  "pytest-asyncio>=0.23",
+]
+
+[project.scripts]
+qobuz-pi-control = "qobuz_pi_control.main:main"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.setuptools.packages.find]
+include = ["qobuz_pi_control*"]
