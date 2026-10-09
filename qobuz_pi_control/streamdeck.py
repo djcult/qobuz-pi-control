@@ -283,13 +283,16 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
                                      f"{(seconds // 60) % 60:02d}:{seconds % 60:02d}")
                     # Qobuz metadata quality, not an ALSA-confirmed output format.
                     quality = str(now_playing.get("quality") or "")
-                    # Quality names vary (e.g. "Hi-Res FLAC 24-bit / 96 kHz").
-                    # Never display codec labels on the quality key.
+                    # Example: "FLAC Hi-Res (up to 24-bit/96kHz)" -> "24/96".
+                    # This is Qobuz's advertised quality, not verified ALSA PCM.
                     import re
-                    bit_match = re.search(r"(16|24|32)\\s*(?:-?bit|bits?)?\\s*/\\s*(44\\.1|48|88\\.2|96|176\\.4|192|352\\.8|384)\\s*(?:kHz)?", quality, re.I)
-                    if not bit_match:
-                        bit_match = re.search(r"(16|24|32)\\s*(?:-?bit|bits?)\\D{0,24}?(44\\.1|48|88\\.2|96|176\\.4|192|352\\.8|384)\\s*(?:kHz)?", quality, re.I)
-                    quality = f"{bit_match.group(1)}/{bit_match.group(2)}" if bit_match else ""
+                    bit_match = re.search(
+                        r"(16|24|32)\\s*(?:-?bit|bits?)?\\s*/\\s*"
+                        r"(44\\.1|48|88\\.2|96|176\\.4|192|352\\.8|384)\\s*(?:kHz)?",
+                        quality, re.IGNORECASE,
+                    )
+                    quality = (f"{bit_match.group(1)}/{bit_match.group(2)}"
+                               if bit_match else "")
                     art_url = now_playing.get("album_art_url") or ""
                     now = loop.time()
                     if art_url and (art_url != last_art_url or now >= failed_art_retry_at):
