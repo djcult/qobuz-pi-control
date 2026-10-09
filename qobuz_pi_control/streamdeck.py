@@ -166,15 +166,34 @@ def _artwork_tiles(deck, artwork: bytes, playing: bool = False,
         # Anchor every word to the same typographic centre, rather than
         # centring its individual glyph bounding box (which shifts words
         # containing ascenders, descenders or punctuation vertically).
+        # Scale the word to fit its own tile, even for unusually long words.
+        # Do not stop at 10pt: a word wider than that was clipped by the LCD.
+        available_width = key_w - 12
         word_font = font_at(19)
-        available_width = key_w - 14
-        for point_size in range(19, 9, -1):
+        for point_size in range(19, 5, -1):
             candidate_font = font_at(point_size)
-            if draw.textbbox((0, 0), word, font=candidate_font)[2] <= available_width:
+            bounds = draw.textbbox((0, 0), word, font=candidate_font)
+            if bounds[2] - bounds[0] <= available_width:
                 word_font = candidate_font
                 break
-        draw.text((x + key_w // 2, middle_top + key_h // 2),
-                  word, font=word_font, anchor="mm", fill=color)
+        else:
+            word_font = font_at(6)
+        bounds = draw.textbbox((0, 0), word, font=word_font)
+        word_width = bounds[2] - bounds[0]
+        if word_width > available_width:
+            # For exceptionally long words, scale the rendered glyphs to
+            # fit without truncation, keeping the same vertical baseline.
+            from PIL import Image as PILImage
+            glyph = PILImage.new("RGBA", (word_width + 4, max(1, bounds[3] - bounds[1] + 4)))
+            glyph_draw = ImageDraw.Draw(glyph)
+            glyph_draw.text((2 - bounds[0], 2 - bounds[1]), word, font=word_font, fill=color)
+            fitted_width = max(1, available_width)
+            glyph = glyph.resize((fitted_width, glyph.height), PILImage.Resampling.LANCZOS)
+            overlay.alpha_composite(glyph, (x + (key_w - fitted_width) // 2,
+                                            middle_top + (key_h - glyph.height) // 2))
+        else:
+            draw.text((x + key_w // 2, middle_top + key_h // 2),
+                      word, font=word_font, anchor="mm", fill=color)
 
     # Bottom row: legible, bold, single-line labels rendered at 4x resolution.
     # Text is deliberately truncated rather than reduced to tiny point sizes.
