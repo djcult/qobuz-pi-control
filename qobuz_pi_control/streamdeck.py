@@ -53,102 +53,137 @@ def _transport_image(deck, playing: bool):
     return PILHelper.to_native_format(deck, image)
 
 
-def _artwork_tiles(deck, artwork: bytes, playing: bool = False, metadata=("", "", ""), remaining=None):
-    """Render 5x3 cover mosaic with transport glyphs over the first three keys."""
+def _artwork_tiles(deck, artwork: bytes, playing: bool = False,
+                   metadata=("", "", ""), remaining=None, progress=None, quality=""):
+    """Compose one continuous 5x3 canvas, then omit the physical button gaps."""
     from PIL import Image, ImageOps, ImageDraw, ImageFont
     from StreamDeck.ImageHelpers import PILHelper
 
+    key_w, key_h = deck.key_image_format()["size"]
+    canvas_w = 5 * key_w + 4 * ART_GAP_PX
+    canvas_h = 3 * key_h + 2 * ART_GAP_PX
     with Image.open(BytesIO(artwork)) as source:
         source.load()
-        key_w, key_h = deck.key_image_format()["size"]
-        canvas_w = 5 * key_w + 4 * ART_GAP_PX
-        canvas_h = 3 * key_h + 2 * ART_GAP_PX
-        cover = ImageOps.fit(source.convert("RGB"), (canvas_w, canvas_h))
-        cover.load()
+        cover = ImageOps.fit(source.convert("RGB"), (canvas_w, canvas_h)).convert("RGBA")
+    overlay = Image.new("RGBA", cover.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay)
 
+    def font_at(size):
+        try:
+            return ImageFont.truetype("DejaVuSans.ttf", size)
+        except OSError:
+            return ImageFont.load_default(size=size)
+
+    def centered(text, box, size, max_lines=2):
+        """Fit text inside a canvas rectangle, shrinking or wrapping as needed."""
+        text = str(text or "").strip()
+        if not text:
+            return
+        x0, y0, x1, y1 = box
+        width = x1 - x0 - 10
+        height = y1 - y0 - 8
+        for point_size in range(size, 9, -1):
+            font = font_at(point_size)
+            words = text.split()
+            lines = []
+            current = ""
+            for word in words:
+                candidate = (current + " " + word).strip()
+                if draw.textbbox((0, 0), candidate, font=font)[2] <= width:
+                    current = candidate
+                else:
+                    if current:
+                        lines.append(current)
+                    current = word
+            if current:
+                lines.append(current)
+            line_h = point_size + 4
+            if len(lines) <= max_lines and len(lines) * line_h <= height and all(
+                draw.textbbox((0, 0), line, font=font)[2] <= width for line in lines
+            ):
+                break
+        else:
+            font = font_at(10)
+            lines = [text]
+            while lines[0] and draw.textbbox((0, 0), lines[0] + "…", font=font)[2] > width:
+                lines[0] = lines[0][:-1]
+            lines[0] += "…"
+            line_h = 14
+        top = (y0 + y1 - len(lines) * line_h) // 2
+        for i, line in enumerate(lines):
+            bounds = draw.textbbox((0, 0), line, font=font)
+            draw.text(((x0 + x1 - (bounds[2] - bounds[0])) // 2,
+                       top + i * line_h - bounds[1]), line, font=font,
+                      fill=(255, 255, 255, 255))
+
+    # Previous / Play-Pause / Next stay on keys 0, 1 and 2.
+    for index in KEY_ACTIONS:
+        cx = index * (key_w + ART_GAP_PX) + key_w // 2
+        cy = key_h // 2
+        radius = min(key_w, key_h) * .34
+        draw.ellipse((cx-radius, cy-radius, cx+radius, cy+radius),
+                     fill=(0, 0, 0, 175))
+        white = (255, 255, 255, 255)
+        if index == 0:
+            draw.rectangle((cx-17, cy-12, cx-13, cy+12), fill=white)
+            draw.polygon([(cx+12, cy-12), (cx-12, cy), (cx+12, cy+12)], fill=white)
+        elif index == 2:
+            draw.rectangle((cx+13, cy-12, cx+17, cy+12), fill=white)
+            draw.polygon([(cx-12, cy-12), (cx+12, cy), (cx-12, cy+12)], fill=white)
+        elif playing:
+            draw.rounded_rectangle((cx-12, cy-13, cx-4, cy+13), radius=2, fill=white)
+            draw.rounded_rectangle((cx+4, cy-13, cx+12, cy+13), radius=2, fill=white)
+        else:
+            draw.polygon([(cx-9, cy-14), (cx-9, cy+14), (cx+15, cy)], fill=white)
+
+    # The middle row is a *single* title banner across all five LCDs.
+    middle_top = key_h + ART_GAP_PX
+    draw.rounded_rectangle((0, middle_top + 12, canvas_w, middle_top + key_h - 8),
+                           radius=10, fill=(0, 0, 0, 155))
+    centered(metadata[2], (12, middle_top + 14, canvas_w - 12,
+                            middle_top + key_h - 28), 28, max_lines=2)
+    if progress is not None:
+        bar_y = middle_top + key_h - 15
+        draw.rounded_rectangle((15, bar_y, canvas_w - 15, bar_y + 5),
+                               radius=2, fill=(220, 220, 220, 100))
+        fill_end = 15 + int((canvas_w - 30) * max(0, min(1, progress)))
+        if fill_end > 15:
+            draw.rounded_rectangle((15, bar_y, fill_end, bar_y + 5),
+                                   radius=2, fill=(255, 255, 255, 240))
+
+    # Bottom row: artist, album, open artwork, quality, remaining time.
+    bottom_top = 2 * (key_h + ART_GAP_PX)
+    for index, value, label in (
+        (10, metadata[0], "ARTIST"),
+        (11, metadata[1], "ALBUM"),
+        (13, quality, "QUALITY"),
+        (14, remaining, "REMAINING"),
+    ):
+        if not value:
+            continue
+        x = (index - 10) * (key_w + ART_GAP_PX)
+        draw.rounded_rectangle((x + 2, bottom_top + 10, x + key_w - 2,
+                                bottom_top + key_h - 8), radius=8,
+                               fill=(0, 0, 0, 180))
+        centered(value, (x + 5, bottom_top + 12, x + key_w - 5,
+                         bottom_top + key_h - 28), 14, max_lines=2)
+        centered(label, (x + 5, bottom_top + key_h - 30,
+                         x + key_w - 5, bottom_top + key_h - 9), 9, max_lines=1)
+
+    composite = Image.alpha_composite(cover, overlay).convert("RGB")
     tiles = []
     for row in range(3):
         for col in range(5):
-            index = row * 5 + col
             x = col * (key_w + ART_GAP_PX)
             y = row * (key_h + ART_GAP_PX)
-            tile = cover.crop((x, y, x + key_w, y + key_h)).copy()
+            tile = composite.crop((x, y, x + key_w, y + key_h)).copy()
             tile.load()
-            if index in KEY_ACTIONS:
-                # Dark translucent disc preserves the artwork behind the icon.
-                rgba = tile.convert("RGBA")
-                overlay = Image.new("RGBA", rgba.size, (0, 0, 0, 0))
-                draw = ImageDraw.Draw(overlay)
-                cx, cy = key_w // 2, key_h // 2
-                radius = min(key_w, key_h) * .34
-                draw.ellipse((cx-radius, cy-radius, cx+radius, cy+radius),
-                             fill=(0, 0, 0, 175))
-                white = (255, 255, 255, 255)
-                if index == 0:  # Previous
-                    draw.rectangle((cx-17, cy-12, cx-13, cy+12), fill=white)
-                    draw.polygon([(cx+12, cy-12), (cx-12, cy), (cx+12, cy+12)], fill=white)
-                elif index == 2:  # Next
-                    draw.rectangle((cx+13, cy-12, cx+17, cy+12), fill=white)
-                    draw.polygon([(cx-12, cy-12), (cx+12, cy), (cx-12, cy+12)], fill=white)
-                elif playing:  # Pause
-                    draw.rounded_rectangle((cx-12, cy-13, cx-4, cy+13), radius=2, fill=white)
-                    draw.rounded_rectangle((cx+4, cy-13, cx+12, cy+13), radius=2, fill=white)
-                else:  # Play
-                    draw.polygon([(cx-9, cy-14), (cx-9, cy+14), (cx+15, cy)], fill=white)
-                tile = Image.alpha_composite(rgba, overlay).convert("RGB")
-            if index == 14 and remaining is not None:
-                rgba = tile.convert("RGBA")
-                overlay = Image.new("RGBA", rgba.size, (0, 0, 0, 0))
-                draw = ImageDraw.Draw(overlay)
-                draw.rounded_rectangle((2, key_h // 2 - 14, key_w - 2, key_h // 2 + 14),
-                                       radius=6, fill=(0, 0, 0, 185))
-                font = ImageFont.load_default(size=14)
-                bounds = draw.textbbox((0, 0), remaining, font=font)
-                draw.text(((key_w - (bounds[2] - bounds[0])) // 2,
-                           (key_h - (bounds[3] - bounds[1])) // 2 - bounds[1]),
-                          remaining, font=font, fill="white")
-                tile = Image.alpha_composite(rgba, overlay).convert("RGB")
-            if index in (5, 6, 7):
-                from textwrap import wrap
-                value = str(metadata[index - 5] or "")
-                if value:
-                    rgba = tile.convert("RGBA")
-                    overlay = Image.new("RGBA", rgba.size, (0, 0, 0, 0))
-                    draw = ImageDraw.Draw(overlay)
-                    draw.rounded_rectangle((3, 7, key_w - 3, key_h - 7),
-                                           radius=8, fill=(0, 0, 0, 175))
-                    font = ImageFont.load_default(size=12)
-                    # Pixel-width-aware wrapping for variable-width text.
-                    words = value.split()
-                    lines = []
-                    line = ""
-                    for word in words:
-                        candidate = (line + " " + word).strip()
-                        if draw.textbbox((0, 0), candidate, font=font)[2] <= key_w - 12:
-                            line = candidate
-                        else:
-                            if line:
-                                lines.append(line)
-                            line = word
-                    if line:
-                        lines.append(line)
-                    lines = lines[:3]
-                    if lines and draw.textbbox((0, 0), lines[-1], font=font)[2] > key_w - 12:
-                        lines[-1] = lines[-1][:11] + "…"
-                    line_h = 15
-                    start_y = (key_h - len(lines) * line_h) // 2
-                    for n, line in enumerate(lines):
-                        bounds = draw.textbbox((0, 0), line, font=font)
-                        draw.text(((key_w - (bounds[2] - bounds[0])) // 2,
-                                   start_y + n * line_h), line, font=font,
-                                  fill="white")
-                    tile = Image.alpha_composite(rgba, overlay).convert("RGB")
             tiles.append(PILHelper.to_native_format(deck, tile))
     return tiles
 
 
-async def _download_artwork(http: aiohttp.ClientSession, deck, url: str, playing: bool = False, metadata=("", "", ""), remaining=None):
-    """Fetch and validate artwork before changing any LCD buttons."""
+async def _download_artwork(http: aiohttp.ClientSession, url: str):
+    """Download a complete cover; leave the current image intact on failure."""
     for attempt in range(2):
         try:
             async with http.get(url) as response:
@@ -158,19 +193,15 @@ async def _download_artwork(http: aiohttp.ClientSession, deck, url: str, playing
                 data = await response.read()
                 if len(data) > 4_000_000:
                     raise ValueError("Artwork exceeds 4 MB")
-                logger.debug("Artwork HTTP %s: content-length=%s, received=%d, JPEG EOI=%s",
-                             response.status, response.headers.get("Content-Length"),
-                             len(data), data.endswith(b"\\xff\\xd9"))
-            tiles = _artwork_tiles(deck, data, playing, metadata, remaining)
-            _download_artwork._last_bytes = data
-            logger.info("Artwork decoded and encoded: %s (%d bytes)", url, len(data))
-            return tiles
+            from PIL import Image
+            with Image.open(BytesIO(data)) as source:
+                source.load()
+            return data
         except asyncio.CancelledError:
             raise
         except Exception:
             logger.warning("Artwork attempt %d failed: %s", attempt + 1, url, exc_info=True)
     return None
-
 
 async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None:
     try:
@@ -211,16 +242,13 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
 
     deck.set_key_callback(on_key_change)
 
-    last_playing = None
-    has_artwork = False
     artwork_bytes = None
-    last_remaining = None
-    last_metadata = ("", "", "")
     last_art_url = None
     failed_art_retry_at = 0.0
+    last_render_state = None
 
     async def refresh_feedback() -> None:
-        nonlocal last_playing, last_art_url, failed_art_retry_at, has_artwork, artwork_bytes, last_metadata, last_remaining
+        nonlocal artwork_bytes, last_art_url, failed_art_retry_at, last_render_state
         timeout = aiohttp.ClientTimeout(total=6)
         async with aiohttp.ClientSession(timeout=timeout) as http:
             while True:
@@ -229,73 +257,81 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
                     playback = status.get("status", "disconnected")
                     now_playing = status.get("now_playing") or {}
                     playing = playback == "playing"
-                    metadata = tuple(str(now_playing.get(field) or "") for field in ("artist", "album", "title"))
+                    metadata = tuple(str(now_playing.get(field) or "")
+                                     for field in ("artist", "album", "title"))
                     duration = now_playing.get("duration_seconds")
                     position = now_playing.get("position_seconds")
                     remaining = None
-                    if duration is not None and position is not None:
-                        seconds = max(0, int(float(duration) - float(position) + 0.999))
-                        remaining = f"{seconds // 3600:02d}:{(seconds // 60) % 60:02d}:{seconds % 60:02d}"
-                    if playing != last_playing:
-                        if has_artwork and artwork_bytes is not None:
-                            tiles = _artwork_tiles(deck, artwork_bytes, playing, metadata, remaining)
-                            deck.set_key_image(1, tiles[1])
-                        elif not has_artwork:
-                            deck.set_key_image(1, _transport_image(deck, playing))
-                        last_playing = playing
-                    if has_artwork and artwork_bytes is not None and metadata != last_metadata:
-                        tiles = _artwork_tiles(deck, artwork_bytes, playing, metadata)
-                        for key in (5, 6, 7):
-                            deck.set_key_image(key, tiles[key])
-                        last_metadata = metadata
-                    if has_artwork and artwork_bytes is not None and remaining != last_remaining:
-                        tiles = _artwork_tiles(deck, artwork_bytes, playing, metadata, remaining)
-                        deck.set_key_image(14, tiles[14])
-                        last_remaining = remaining
-                    if not has_artwork:
-                        show(5, playback.upper())
-                        show(6, str(now_playing.get("title") or "")[:16])
-                        show(7, str(now_playing.get("artist") or "")[:16])
-
+                    progress = None
+                    if duration is not None and position is not None and float(duration) > 0:
+                        duration = float(duration)
+                        position = max(0.0, min(float(position), duration))
+                        seconds = max(0, int(duration - position + 0.999))
+                        remaining = (f"{seconds // 3600:02d}:"
+                                     f"{(seconds // 60) % 60:02d}:{seconds % 60:02d}")
+                        progress = position / duration
+                    # Qobuz metadata quality, not an ALSA-confirmed output format.
+                    quality = str(now_playing.get("quality") or "")
                     art_url = now_playing.get("album_art_url") or ""
                     now = loop.time()
                     if art_url and (art_url != last_art_url or now >= failed_art_retry_at):
-                        if all(key < deck.key_count() for key in ART_KEYS):
-                            tiles = await _download_artwork(http, deck, art_url, playing, metadata, remaining)
-                            if tiles is not None:
-                                for key, tile in zip(ART_KEYS, tiles):
-                                    deck.set_key_image(key, tile)
-                                    rendered.pop(key, None)
-                                last_art_url = art_url
-                                has_artwork = True
-                                last_metadata = metadata
-                                last_remaining = remaining
-                                # Cache the source bytes for dynamic Play/Pause overlays.
-                                artwork_bytes = getattr(_download_artwork, "_last_bytes", None)
-                                failed_art_retry_at = float("inf")
-                            else:
-                                logger.warning("Artwork unavailable; keeping previous cover")
-                                last_art_url = art_url
-                                failed_art_retry_at = now + 30.0
+                        data = await _download_artwork(http, art_url)
+                        if data is not None:
+                            artwork_bytes = data
+                            last_art_url = art_url
+                            failed_art_retry_at = float("inf")
+                            last_render_state = None
+                        else:
+                            last_art_url = art_url
+                            failed_art_retry_at = now + 30.0
                     elif not art_url and last_art_url:
-                        last_art_url = None
-                        has_artwork = False
                         artwork_bytes = None
-                        last_metadata = ("", "", "")
-                        last_remaining = None
+                        last_art_url = None
                         failed_art_retry_at = 0.0
+                        last_render_state = None
+                        rendered.clear()
                         for key in ART_KEYS:
                             show(key, "")
-                        last_playing = None
+
+                    if artwork_bytes is not None:
+                        # Round progress to a physical pixel to avoid needless USB updates.
+                        bar_pixels = round((5 * deck.key_image_format()["size"][0]
+                                            + 4 * ART_GAP_PX - 30) * (progress or 0))
+                        state = (last_art_url, playing, metadata, remaining, bar_pixels, quality)
+                        if state != last_render_state:
+                            tiles = _artwork_tiles(deck, artwork_bytes, playing, metadata,
+                                                   remaining, progress, quality)
+                            if last_render_state is None or state[0] != last_render_state[0]:
+                                keys = ART_KEYS
+                            else:
+                                keys = set()
+                                if state[1] != last_render_state[1]:
+                                    keys.add(1)
+                                if state[2] != last_render_state[2]:
+                                    keys.update((5, 6, 7, 8, 9, 10, 11))
+                                if state[3] != last_render_state[3]:
+                                    keys.add(14)
+                                if state[4] != last_render_state[4]:
+                                    keys.update((5, 6, 7, 8, 9))
+                                if state[5] != last_render_state[5]:
+                                    keys.add(13)
+                            for key in keys:
+                                deck.set_key_image(key, tiles[key])
+                            last_render_state = state
+                    else:
+                        show(0, "PREV")
+                        show(2, "NEXT")
+                        show(5, playback.upper())
+                        show(6, str(now_playing.get("title") or "")[:16])
+                        show(7, str(now_playing.get("artist") or "")[:16])
+                        deck.set_key_image(1, _transport_image(deck, playing))
                 except asyncio.CancelledError:
                     raise
                 except Exception:
                     logger.warning("Could not refresh Stream Deck playback status",
                                    exc_info=True)
-                    show(5, "OFFLINE")
-                    if last_playing is not False and not has_artwork:
-                        deck.set_key_image(1, _transport_image(deck, False))
-                        last_playing = False
+                    if artwork_bytes is None:
+                        show(5, "OFFLINE")
                 await asyncio.sleep(1.0)
 
     feedback_task = asyncio.create_task(refresh_feedback())
