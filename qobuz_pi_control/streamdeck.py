@@ -312,17 +312,20 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
                     words = marquee_text.split()
                     title_offset = 0
                     if len(words) > 5:
-                        # Faster word marquee: 0.5-second steps, short end holds.
+                        # Hold the track title on screen before scrolling.
                         elapsed = max(0.0, loop.time() - title_started_at)
                         last_offset = len(words) - 5
                         step_seconds = 0.5
-                        hold_seconds = 0.5
-                        cycle = 2 * hold_seconds + last_offset * step_seconds
+                        initial_hold_seconds = 2.5
+                        end_hold_seconds = 0.5
+                        cycle = (initial_hold_seconds
+                                 + last_offset * step_seconds
+                                 + end_hold_seconds)
                         phase = elapsed % cycle
-                        if phase >= hold_seconds:
+                        if phase >= initial_hold_seconds:
                             title_offset = min(
                                 last_offset,
-                                1 + int((phase - hold_seconds) / step_seconds),
+                                1 + int((phase - initial_hold_seconds) / step_seconds),
                             )
                     duration = now_playing.get("duration_seconds")
                     position = now_playing.get("position_seconds")
