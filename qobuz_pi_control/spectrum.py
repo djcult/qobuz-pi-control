@@ -54,6 +54,28 @@ def simulated_bands(t: float, bands: int = BANDS) -> list[float]:
     return values
 
 
+# Muted vintage spectrum palette, low to high frequencies.
+PALETTE = (
+    (0.00, (180, 55, 54)),    # deep red
+    (0.18, (218, 105, 45)),   # orange
+    (0.38, (231, 185, 65)),   # amber
+    (0.57, (111, 188, 96)),   # green
+    (0.78, (73, 181, 185)),   # cyan
+    (1.00, (80, 115, 205)),   # blue
+)
+
+
+def band_color(position: float) -> tuple[int, int, int]:
+    """Interpolate muted colours across log-spaced frequency bands."""
+    position = max(0.0, min(1.0, position))
+    for (left, start), (right, end) in zip(PALETTE, PALETTE[1:]):
+        if position <= right:
+            fraction = (position - left) / (right - left)
+            return tuple(round(a + (b - a) * fraction)
+                         for a, b in zip(start, end))
+    return PALETTE[-1][1]
+
+
 def render_canvas(spectrum: Spectrum, key_size: tuple[int, int] = (72, 72),
                   gap: int = GAP) -> Image.Image:
     """Render one logical canvas; tile gaps are excluded when sliced."""
@@ -68,14 +90,16 @@ def render_canvas(spectrum: Spectrum, key_size: tuple[int, int] = (72, 72),
     bar_width = max(2, int(spacing * 0.62))
     for i, (level, peak) in enumerate(zip(spectrum.levels, spectrum.peaks)):
         x = round(margin + (i + 0.5) * spacing)
+        color = band_color(i / max(1, len(spectrum.levels) - 1))
+        peak_color = tuple(round(channel + (255 - channel) * 0.48) for channel in color)
         top = height - margin - round(level * usable_height)
         bottom = height - margin
         if bottom > top:
             draw.rectangle((x - bar_width // 2, top, x + bar_width // 2, bottom),
-                           fill=(235, 159, 54))
+                           fill=color)
         peak_y = height - margin - round(peak * usable_height)
         draw.line((x - bar_width // 2, peak_y, x + bar_width // 2, peak_y),
-                  fill=(255, 224, 154), width=2)
+                  fill=peak_color, width=2)
     return image
 
 
