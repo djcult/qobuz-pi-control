@@ -167,8 +167,6 @@ def _artwork_tiles(deck, artwork: bytes, playing: bool = False,
     # Text is deliberately truncated rather than reduced to tiny point sizes.
     bottom_top = 2 * (key_h + ART_GAP_PX)
     for index, value in (
-        (10, metadata[0]),
-        (11, metadata[1]),
         (13, quality),
         (14, remaining),
     ):
@@ -305,10 +303,15 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
                     playing = playback == "playing"
                     metadata = tuple(str(now_playing.get(field) or "")
                                      for field in ("artist", "album", "title"))
-                    if metadata[2] != last_title:
-                        last_title = metadata[2]
+                    marquee_text = " - ".join(part for part in
+                                               (metadata[2], metadata[1]) if part)
+                    display_metadata = (metadata[0], metadata[1], marquee_text)
+                    marquee_text = " - ".join(part for part in
+                                               (metadata[2], metadata[1]) if part)
+                    if marquee_text != last_title:
+                        last_title = marquee_text
                         title_started_at = loop.time()
-                    words = metadata[2].split()
+                    words = marquee_text.split()
                     title_offset = 0
                     if len(words) > 5:
                         # 2-second initial hold, 1.5 seconds per step, 2-second end hold.
@@ -361,9 +364,9 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
                             show(key, "")
 
                     if artwork_bytes is not None:
-                        state = (last_art_url, playing, metadata, remaining, quality, display_revision, title_offset)
+                        state = (last_art_url, playing, display_metadata, remaining, quality, display_revision, title_offset)
                         if state != last_render_state:
-                            tiles = _artwork_tiles(deck, artwork_bytes, playing, metadata,
+                            tiles = _artwork_tiles(deck, artwork_bytes, playing, display_metadata,
                                                    remaining, None, quality, show_overlays, title_offset)
                             if last_render_state is None or state[0] != last_render_state[0] or state[5] != last_render_state[5]:
                                 keys = ART_KEYS
@@ -374,7 +377,7 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
                                 if show_overlays and state[1] != last_render_state[1]:
                                     keys.add(1)
                                 if show_overlays and state[2] != last_render_state[2]:
-                                    keys.update((5, 6, 7, 8, 9, 10, 11))
+                                    keys.update((5, 6, 7, 8, 9))
                                 if show_overlays and state[3] != last_render_state[3]:
                                     keys.add(14)
                                 if show_overlays and state[4] != last_render_state[4]:
