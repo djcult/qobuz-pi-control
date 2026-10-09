@@ -157,7 +157,7 @@ def _artwork_tiles(deck, artwork: bytes, playing: bool = False,
         x = (index - 10) * (key_w + ART_GAP_PX)
         draw.rounded_rectangle((x + 2, bottom_top + 7, x + key_w - 2,
                                 bottom_top + key_h - 7), radius=8,
-                               fill=(0, 0, 0, 175))
+                               fill=(0, 0, 0, 110))
         scale = 4
         from PIL import Image as PILImage
         text_layer = PILImage.new("RGBA", (key_w * scale, key_h * scale),
