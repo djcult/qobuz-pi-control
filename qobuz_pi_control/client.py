@@ -49,7 +49,7 @@ class QobuzProxyClient:
         url = f"{self.base_url}/api/speakers/{self.speaker_id}/actions/{action}"
         async with self._session.post(url) as response:
             data = await response.json()
-            if response.status not in (200, 409):
+            if response.status not in (200, 202, 409):
                 raise RuntimeError(
                     f"qobuz-proxy returned HTTP {response.status}: {data.get('error', data)}"
                 )
