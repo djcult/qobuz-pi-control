@@ -287,8 +287,8 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
                     # This is Qobuz's advertised quality, not verified ALSA PCM.
                     import re
                     bit_match = re.search(
-                        r"(16|24|32)\\s*(?:-?bit|bits?)?\\s*/\\s*"
-                        r"(44\\.1|48|88\\.2|96|176\\.4|192|352\\.8|384)\\s*(?:kHz)?",
+                        r"(16|24|32)\s*(?:-?bit|bits?)?\s*/\s*"
+                        r"(44\.1|48|88\.2|96|176\.4|192|352\.8|384)\s*(?:kHz)?",
                         quality, re.IGNORECASE,
                     )
                     quality = (f"{bit_match.group(1)}/{bit_match.group(2)}"
