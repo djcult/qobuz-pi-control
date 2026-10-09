@@ -52,53 +52,50 @@ def _transport_image(deck, playing: bool):
 
 
 def _artwork_tiles(deck, artwork: bytes):
-    """Strictly decode and split one square cover into four LCD images."""
+    """Decode once, then render independent fully loaded RGB tiles."""
     from PIL import Image, ImageOps
     from StreamDeck.ImageHelpers import PILHelper
 
     with Image.open(BytesIO(artwork)) as source:
-        source.load()  # Reject truncated/corrupt JPEGs before any LCD writes.
-        size = deck.key_image_format()["size"]
-        cover = ImageOps.fit(source.convert("RGB"), (2 * size[0], 2 * size[1]))
-    width, height = cover.size
-    return [
-        PILHelper.to_native_format(
-            deck,
-            cover.crop((col * width // 2, row * height // 2,
-                        (col + 1) * width // 2, (row + 1) * height // 2)),
-        )
-        for row in range(2) for col in range(2)
-    ]
+        source.load()
+        logger.debug("Source artwork decoded: %s %s", source.format, source.size)
+        key_size = deck.key_image_format()["size"]
+        cover = ImageOps.fit(source.convert("RGB"), (2 * key_size[0], 2 * key_size[1]))
+        cover.load()
 
-
-def _artwork_urls(url: str) -> list[str]:
-    """Try the original URL, then a smaller Qobuz cover if applicable."""
-    urls = [url]
-    if "_600." in url:
-        urls.append(url.replace("_600.", "_300."))
-    return urls
+    tiles = []
+    for row in range(2):
+        for col in range(2):
+            tile = cover.crop((col * key_size[0], row * key_size[1],
+                               (col + 1) * key_size[0], (row + 1) * key_size[1])).copy()
+            tile.load()
+            encoded = PILHelper.to_native_format(deck, tile)
+            logger.debug("Encoded artwork tile %d: %d bytes", row * 2 + col, len(encoded))
+            tiles.append(encoded)
+    return tiles
 
 
 async def _download_artwork(http: aiohttp.ClientSession, deck, url: str):
-    """Retry each candidate, validating all four tiles before displaying any."""
-    for candidate in _artwork_urls(url):
-        for attempt in range(2):
-            try:
-                async with http.get(candidate) as response:
-                    response.raise_for_status()
-                    if int(response.headers.get("Content-Length", 0)) > 4_000_000:
-                        raise ValueError("Artwork exceeds 4 MB")
-                    data = await response.content.read(4_000_001)
-                    if len(data) > 4_000_000:
-                        raise ValueError("Artwork exceeds 4 MB")
-                tiles = _artwork_tiles(deck, data)
-                logger.info("Artwork decoded: %s (%d bytes)", candidate, len(data))
-                return tiles
-            except asyncio.CancelledError:
-                raise
-            except Exception as exc:
-                logger.warning("Artwork attempt %d failed (%s): %s",
-                               attempt + 1, candidate, exc)
+    """Fetch and validate artwork before changing any LCD buttons."""
+    for attempt in range(2):
+        try:
+            async with http.get(url) as response:
+                response.raise_for_status()
+                if int(response.headers.get("Content-Length", 0)) > 4_000_000:
+                    raise ValueError("Artwork exceeds 4 MB")
+                data = await response.read()
+                if len(data) > 4_000_000:
+                    raise ValueError("Artwork exceeds 4 MB")
+                logger.debug("Artwork HTTP %s: content-length=%s, received=%d, JPEG EOI=%s",
+                             response.status, response.headers.get("Content-Length"),
+                             len(data), data.endswith(b"\\xff\\xd9"))
+            tiles = _artwork_tiles(deck, data)
+            logger.info("Artwork decoded and encoded: %s (%d bytes)", url, len(data))
+            return tiles
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.warning("Artwork attempt %d failed: %s", attempt + 1, url, exc_info=True)
     return None
 
 
