@@ -54,7 +54,7 @@ def _transport_image(deck, playing: bool):
 
 
 def _artwork_tiles(deck, artwork: bytes, playing: bool = False,
-                   metadata=("", "", ""), remaining=None, progress=None, quality="", show_overlays=True):
+                   metadata=("", "", ""), remaining=None, progress=None, quality="", show_overlays=True, title_offset=0):
     """Compose one continuous 5x3 canvas, then omit the physical button gaps."""
     from PIL import Image, ImageOps, ImageDraw, ImageFont
     from StreamDeck.ImageHelpers import PILHelper
@@ -149,12 +149,19 @@ def _artwork_tiles(deck, artwork: bytes, playing: bool = False,
         else:
             draw.polygon([(cx-9, cy-14), (cx-9, cy+14), (cx+15, cy)], fill=white)
 
-    # The middle row is a *single* title banner across all five LCDs.
+    # Five independent word slots on one continuous translucent title band.
     middle_top = key_h + ART_GAP_PX
     draw.rounded_rectangle((0, middle_top + 12, canvas_w, middle_top + key_h - 8),
                            radius=10, fill=(0, 0, 0, 155))
-    centered(metadata[2], (12, middle_top + 14, canvas_w - 12,
-                            middle_top + key_h - 28), 28, max_lines=2)
+    words = str(metadata[2] or "").split()
+    visible = words[title_offset:title_offset + 5]
+    # Short titles sit centred as a group; long titles occupy all five slots.
+    start_col = (5 - len(visible)) // 2 if len(words) <= 5 else 0
+    for slot, word in enumerate(visible):
+        col = start_col + slot
+        x = col * (key_w + ART_GAP_PX)
+        centered(word, (x + 2, middle_top + 15, x + key_w - 2,
+                        middle_top + key_h - 13), 19, max_lines=1)
 
     # Bottom row: legible, bold, single-line labels rendered at 4x resolution.
     # Text is deliberately truncated rather than reduced to tiny point sizes.
@@ -283,9 +290,11 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
     last_art_url = None
     failed_art_retry_at = 0.0
     last_render_state = None
+    title_started_at = loop.time()
+    last_title = None
 
     async def refresh_feedback() -> None:
-        nonlocal artwork_bytes, last_art_url, failed_art_retry_at, last_render_state
+        nonlocal artwork_bytes, last_art_url, failed_art_retry_at, last_render_state, title_started_at, last_title
         timeout = aiohttp.ClientTimeout(total=6)
         async with aiohttp.ClientSession(timeout=timeout) as http:
             while True:
@@ -296,6 +305,19 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
                     playing = playback == "playing"
                     metadata = tuple(str(now_playing.get(field) or "")
                                      for field in ("artist", "album", "title"))
+                    if metadata[2] != last_title:
+                        last_title = metadata[2]
+                        title_started_at = loop.time()
+                    words = metadata[2].split()
+                    title_offset = 0
+                    if len(words) > 5:
+                        # 2-second initial hold, 1.5 seconds per step, 2-second end hold.
+                        elapsed = max(0.0, loop.time() - title_started_at)
+                        last_offset = len(words) - 5
+                        cycle = 2.0 + last_offset * 1.5 + 2.0
+                        phase = elapsed % cycle
+                        if phase >= 2.0:
+                            title_offset = min(last_offset, 1 + int((phase - 2.0) / 1.5))
                     duration = now_playing.get("duration_seconds")
                     position = now_playing.get("position_seconds")
                     remaining = None
@@ -339,10 +361,10 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
                             show(key, "")
 
                     if artwork_bytes is not None:
-                        state = (last_art_url, playing, metadata, remaining, quality, display_revision)
+                        state = (last_art_url, playing, metadata, remaining, quality, display_revision, title_offset)
                         if state != last_render_state:
                             tiles = _artwork_tiles(deck, artwork_bytes, playing, metadata,
-                                                   remaining, None, quality, show_overlays)
+                                                   remaining, None, quality, show_overlays, title_offset)
                             if last_render_state is None or state[0] != last_render_state[0] or state[5] != last_render_state[5]:
                                 keys = ART_KEYS
                             else:
@@ -357,6 +379,8 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
                                     keys.add(14)
                                 if show_overlays and state[4] != last_render_state[4]:
                                     keys.add(13)
+                                if show_overlays and state[6] != last_render_state[6]:
+                                    keys.update((5, 6, 7, 8, 9))
                             for key in keys:
                                 deck.set_key_image(key, tiles[key])
                             last_render_state = state
