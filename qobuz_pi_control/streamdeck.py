@@ -51,30 +51,51 @@ def _transport_image(deck, playing: bool):
     return PILHelper.to_native_format(deck, image)
 
 
-def _artwork_tiles(deck, artwork: bytes):
-    """Crop the square cover to 5:3 and encode 15 independent LCD tiles."""
-    from PIL import Image, ImageOps
+def _artwork_tiles(deck, artwork: bytes, playing: bool = False):
+    """Render 5x3 cover mosaic with transport glyphs over the first three keys."""
+    from PIL import Image, ImageOps, ImageDraw
     from StreamDeck.ImageHelpers import PILHelper
 
     with Image.open(BytesIO(artwork)) as source:
         source.load()
         key_w, key_h = deck.key_image_format()["size"]
-        # Fill the entire 5x3 mosaic without distortion. This crops top/bottom
-        # of the square album cover; physical gaps remain between LCD buttons.
         cover = ImageOps.fit(source.convert("RGB"), (5 * key_w, 3 * key_h))
         cover.load()
 
     tiles = []
     for row in range(3):
         for col in range(5):
+            index = row * 5 + col
             tile = cover.crop((col * key_w, row * key_h,
                                (col + 1) * key_w, (row + 1) * key_h)).copy()
             tile.load()
+            if index in KEY_ACTIONS:
+                # Dark translucent disc preserves the artwork behind the icon.
+                rgba = tile.convert("RGBA")
+                overlay = Image.new("RGBA", rgba.size, (0, 0, 0, 0))
+                draw = ImageDraw.Draw(overlay)
+                cx, cy = key_w // 2, key_h // 2
+                radius = min(key_w, key_h) * .34
+                draw.ellipse((cx-radius, cy-radius, cx+radius, cy+radius),
+                             fill=(0, 0, 0, 175))
+                white = (255, 255, 255, 255)
+                if index == 0:  # Previous
+                    draw.rectangle((cx-17, cy-12, cx-13, cy+12), fill=white)
+                    draw.polygon([(cx+12, cy-12), (cx-12, cy), (cx+12, cy+12)], fill=white)
+                elif index == 2:  # Next
+                    draw.rectangle((cx+13, cy-12, cx+17, cy+12), fill=white)
+                    draw.polygon([(cx-12, cy-12), (cx+12, cy), (cx-12, cy+12)], fill=white)
+                elif playing:  # Pause
+                    draw.rounded_rectangle((cx-12, cy-13, cx-4, cy+13), radius=2, fill=white)
+                    draw.rounded_rectangle((cx+4, cy-13, cx+12, cy+13), radius=2, fill=white)
+                else:  # Play
+                    draw.polygon([(cx-9, cy-14), (cx-9, cy+14), (cx+15, cy)], fill=white)
+                tile = Image.alpha_composite(rgba, overlay).convert("RGB")
             tiles.append(PILHelper.to_native_format(deck, tile))
     return tiles
 
 
-async def _download_artwork(http: aiohttp.ClientSession, deck, url: str):
+async def _download_artwork(http: aiohttp.ClientSession, deck, url: str, playing: bool = False):
     """Fetch and validate artwork before changing any LCD buttons."""
     for attempt in range(2):
         try:
@@ -88,7 +109,8 @@ async def _download_artwork(http: aiohttp.ClientSession, deck, url: str):
                 logger.debug("Artwork HTTP %s: content-length=%s, received=%d, JPEG EOI=%s",
                              response.status, response.headers.get("Content-Length"),
                              len(data), data.endswith(b"\\xff\\xd9"))
-            tiles = _artwork_tiles(deck, data)
+            tiles = _artwork_tiles(deck, data, playing)
+            _download_artwork._last_bytes = data
             logger.info("Artwork decoded and encoded: %s (%d bytes)", url, len(data))
             return tiles
         except asyncio.CancelledError:
@@ -139,11 +161,12 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
 
     last_playing = None
     has_artwork = False
+    artwork_bytes = None
     last_art_url = None
     failed_art_retry_at = 0.0
 
     async def refresh_feedback() -> None:
-        nonlocal last_playing, last_art_url, failed_art_retry_at, has_artwork
+        nonlocal last_playing, last_art_url, failed_art_retry_at, has_artwork, artwork_bytes
         timeout = aiohttp.ClientTimeout(total=6)
         async with aiohttp.ClientSession(timeout=timeout) as http:
             while True:
@@ -153,7 +176,10 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
                     now_playing = status.get("now_playing") or {}
                     playing = playback == "playing"
                     if playing != last_playing:
-                        if not has_artwork:
+                        if has_artwork and artwork_bytes is not None:
+                            tiles = _artwork_tiles(deck, artwork_bytes, playing)
+                            deck.set_key_image(1, tiles[1])
+                        elif not has_artwork:
                             deck.set_key_image(1, _transport_image(deck, playing))
                         last_playing = playing
                     if not has_artwork:
@@ -165,13 +191,15 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
                     now = loop.time()
                     if art_url and (art_url != last_art_url or now >= failed_art_retry_at):
                         if all(key < deck.key_count() for key in ART_KEYS):
-                            tiles = await _download_artwork(http, deck, art_url)
+                            tiles = await _download_artwork(http, deck, art_url, playing)
                             if tiles is not None:
                                 for key, tile in zip(ART_KEYS, tiles):
                                     deck.set_key_image(key, tile)
                                     rendered.pop(key, None)
                                 last_art_url = art_url
                                 has_artwork = True
+                                # Cache the source bytes for dynamic Play/Pause overlays.
+                                artwork_bytes = getattr(_download_artwork, "_last_bytes", None)
                                 failed_art_retry_at = float("inf")
                             else:
                                 logger.warning("Artwork unavailable; keeping previous cover")
@@ -180,6 +208,7 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
                     elif not art_url and last_art_url:
                         last_art_url = None
                         has_artwork = False
+                        artwork_bytes = None
                         failed_art_retry_at = 0.0
                         for key in ART_KEYS:
                             show(key, "")
