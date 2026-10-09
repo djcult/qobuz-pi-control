@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from functools import partial
 
 from .config import StreamDeckConfig
 
@@ -33,7 +32,7 @@ def _label_image(deck, label: str):
     return PILHelper.to_native_format(deck, image)
 
 
-async def run_streamdeck(config: StreamDeckConfig, dispatch) -> None:
+async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None:
     try:
         from StreamDeck.DeviceManager import DeviceManager
     except ImportError as exc:
@@ -69,8 +68,39 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch) -> None:
 
     deck.set_key_callback(on_key_change)
 
+    # The proxy is authoritative: polling also catches Qobuz-app and FLIRC changes.
+    # Only redraw changed labels to avoid unnecessary USB traffic.
+    rendered = dict(labels)
+
+    def show(key: int, label: str) -> None:
+        if key >= deck.key_count() or rendered.get(key) == label:
+            return
+        deck.set_key_image(key, _label_image(deck, label))
+        rendered[key] = label
+
+    async def refresh_feedback() -> None:
+        while True:
+            try:
+                status = await get_status()
+                playback = status.get("status", "disconnected")
+                now_playing = status.get("now_playing") or {}
+                show(1, "PAUSE" if playback == "playing" else "PLAY")
+                show(5, "PLAYING" if playback == "playing" else playback.upper())
+                show(6, str(now_playing.get("title") or "")[:16])
+                show(7, str(now_playing.get("artist") or "")[:16])
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.warning("Could not refresh Stream Deck playback status", exc_info=True)
+                show(5, "OFFLINE")
+                show(1, "PLAY")
+            await asyncio.sleep(1.0)
+
+    feedback_task = asyncio.create_task(refresh_feedback())
     try:
         await asyncio.Event().wait()
     finally:
+        feedback_task.cancel()
+        await asyncio.gather(feedback_task, return_exceptions=True)
         deck.reset()
         deck.close()
