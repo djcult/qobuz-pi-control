@@ -39,7 +39,7 @@ async def run(config_path: str, no_flirc: bool = False, no_streamdeck: bool = Fa
         if config.flirc.enabled and not no_flirc:
             tasks.append(asyncio.create_task(run_flirc(config.flirc, dispatch)))
         if config.streamdeck.enabled and not no_streamdeck:
-            tasks.append(asyncio.create_task(run_streamdeck(config.streamdeck, dispatch)))
+            tasks.append(asyncio.create_task(run_streamdeck(config.streamdeck, dispatch, client.status)))
 
         if not tasks:
             raise RuntimeError("No control adapters enabled")
