@@ -129,25 +129,43 @@ def _artwork_tiles(deck, artwork: bytes, playing: bool = False,
                        top + i * line_h - bounds[1]), line, font=font,
                       fill=color)
 
-    # Previous / Play-Pause / Next stay on keys 0, 1 and 2.
-    for index in (KEY_ACTIONS if show_overlays else ()):
-        cx = index * (key_w + ART_GAP_PX) + key_w // 2
-        cy = key_h // 2
-        radius = min(key_w, key_h) * .34
-        draw.ellipse((cx-radius, cy-radius, cx+radius, cy+radius),
-                     fill=(0, 0, 0, 175))
-        white = (255, 255, 255, 255)
-        if index == 0:
-            draw.rectangle((cx-17, cy-12, cx-13, cy+12), fill=white)
-            draw.polygon([(cx+12, cy-12), (cx-12, cy), (cx+12, cy+12)], fill=white)
-        elif index == 2:
-            draw.rectangle((cx+13, cy-12, cx+17, cy+12), fill=white)
-            draw.polygon([(cx-12, cy-12), (cx+12, cy), (cx-12, cy+12)], fill=white)
-        elif playing:
-            draw.rounded_rectangle((cx-12, cy-13, cx-4, cy+13), radius=2, fill=white)
-            draw.rounded_rectangle((cx+4, cy-13, cx+12, cy+13), radius=2, fill=white)
-        else:
-            draw.polygon([(cx-9, cy-14), (cx-9, cy+14), (cx+15, cy)], fill=white)
+    # Minimal, antialiased media controls: conventional skip-back,
+    # play/pause and skip-forward glyphs on subtle circular scrims.
+    if show_overlays:
+        from PIL import Image as PILImage
+        scale = 4
+        icon_size = 48
+        for index in KEY_ACTIONS:
+            cx = index * (key_w + ART_GAP_PX) + key_w // 2
+            cy = key_h // 2
+            glyph = PILImage.new("RGBA", (icon_size * scale, icon_size * scale))
+            gd = ImageDraw.Draw(glyph)
+            def rect(x0, y0, x1, y1, radius=0):
+                bounds = tuple(round(v * scale) for v in (x0, y0, x1, y1))
+                if radius:
+                    gd.rounded_rectangle(bounds, radius=radius * scale, fill="white")
+                else:
+                    gd.rectangle(bounds, fill="white")
+            def triangle(points):
+                gd.polygon([(round(x * scale), round(y * scale)) for x, y in points],
+                           fill="white")
+            if index == 0:  # Previous: point LEFT, with a stop bar.
+                rect(12, 13, 15, 35, radius=1)
+                triangle([(34, 12), (34, 36), (16, 24)])
+            elif index == 2:  # Next: point RIGHT, with a stop bar.
+                triangle([(14, 12), (14, 36), (32, 24)])
+                rect(33, 13, 36, 35, radius=1)
+            elif playing:
+                rect(15, 13, 21, 35, radius=1)
+                rect(27, 13, 33, 35, radius=1)
+            else:
+                triangle([(17, 12), (17, 36), (35, 24)])
+            glyph = glyph.resize((icon_size, icon_size), PILImage.Resampling.LANCZOS)
+            scrim_radius = 25
+            draw.ellipse((cx - scrim_radius, cy - scrim_radius,
+                          cx + scrim_radius, cy + scrim_radius),
+                         fill=(0, 0, 0, 115))
+            overlay.alpha_composite(glyph, (cx - icon_size // 2, cy - icon_size // 2))
 
     # Five independent word slots on one continuous translucent title band.
     middle_top = key_h + ART_GAP_PX
