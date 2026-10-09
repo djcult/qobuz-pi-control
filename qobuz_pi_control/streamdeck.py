@@ -143,7 +143,8 @@ def _artwork_tiles(deck, artwork: bytes, playing: bool = False,
     centered(metadata[2], (12, middle_top + 14, canvas_w - 12,
                             middle_top + key_h - 28), 28, max_lines=2)
 
-    # Bottom row: artist, album, open artwork, quality, remaining time.
+    # Bottom row: legible, bold, single-line labels rendered at 4x resolution.
+    # Text is deliberately truncated rather than reduced to tiny point sizes.
     bottom_top = 2 * (key_h + ART_GAP_PX)
     for index, value in (
         (10, metadata[0]),
@@ -154,12 +155,33 @@ def _artwork_tiles(deck, artwork: bytes, playing: bool = False,
         if not value:
             continue
         x = (index - 10) * (key_w + ART_GAP_PX)
-        draw.rounded_rectangle((x + 2, bottom_top + 10, x + key_w - 2,
-                                bottom_top + key_h - 8), radius=8,
-                               fill=(0, 0, 0, 180))
-        # Single centred line, with no field label.
-        centered(value, (x + 5, bottom_top + 12, x + key_w - 5,
-                         bottom_top + key_h - 10), 14, max_lines=1)
+        draw.rounded_rectangle((x + 2, bottom_top + 7, x + key_w - 2,
+                                bottom_top + key_h - 7), radius=8,
+                               fill=(0, 0, 0, 235))
+        scale = 4
+        from PIL import Image as PILImage
+        text_layer = PILImage.new("RGBA", (key_w * scale, key_h * scale),
+                                  (0, 0, 0, 0))
+        td = ImageDraw.Draw(text_layer)
+        try:
+            font = ImageFont.truetype("DejaVuSans-Bold.ttf", 15 * scale)
+        except OSError:
+            font = ImageFont.load_default(size=15 * scale)
+        value = str(value).strip()
+        available = (key_w - 10) * scale
+        def text_width(candidate):
+            bb = td.textbbox((0, 0), candidate, font=font)
+            return bb[2] - bb[0]
+        if text_width(value) > available:
+            while value and text_width(value + "…") > available:
+                value = value[:-1]
+            value += "…"
+        bounds = td.textbbox((0, 0), value, font=font)
+        td.text(((key_w * scale - (bounds[2] - bounds[0])) // 2,
+                 (key_h * scale - (bounds[3] - bounds[1])) // 2 - bounds[1]),
+                value, font=font, fill=(255, 255, 255, 255))
+        text_layer = text_layer.resize((key_w, key_h), PILImage.Resampling.LANCZOS)
+        overlay.alpha_composite(text_layer, (x, bottom_top))
 
     composite = Image.alpha_composite(cover, overlay).convert("RGB")
     tiles = []
