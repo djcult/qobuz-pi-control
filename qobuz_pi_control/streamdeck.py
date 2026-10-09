@@ -13,9 +13,9 @@ from .config import StreamDeckConfig
 logger = logging.getLogger(__name__)
 
 # Stream Deck Original: 5 columns x 3 rows.
-# Artwork occupies a 2x2 square at the right (keys 3, 4, 8, 9).
+# Experimental 5x3 full-deck artwork mosaic. Keys 0/1/2 still control playback.
 KEY_ACTIONS = {0: "previous", 1: "toggle", 2: "next"}
-ART_KEYS = (3, 4, 8, 9)
+ART_KEYS = tuple(range(15))
 
 
 def _label_image(deck, label: str):
@@ -52,26 +52,25 @@ def _transport_image(deck, playing: bool):
 
 
 def _artwork_tiles(deck, artwork: bytes):
-    """Decode once, then render independent fully loaded RGB tiles."""
+    """Crop the square cover to 5:3 and encode 15 independent LCD tiles."""
     from PIL import Image, ImageOps
     from StreamDeck.ImageHelpers import PILHelper
 
     with Image.open(BytesIO(artwork)) as source:
         source.load()
-        logger.debug("Source artwork decoded: %s %s", source.format, source.size)
-        key_size = deck.key_image_format()["size"]
-        cover = ImageOps.fit(source.convert("RGB"), (2 * key_size[0], 2 * key_size[1]))
+        key_w, key_h = deck.key_image_format()["size"]
+        # Fill the entire 5x3 mosaic without distortion. This crops top/bottom
+        # of the square album cover; physical gaps remain between LCD buttons.
+        cover = ImageOps.fit(source.convert("RGB"), (5 * key_w, 3 * key_h))
         cover.load()
 
     tiles = []
-    for row in range(2):
-        for col in range(2):
-            tile = cover.crop((col * key_size[0], row * key_size[1],
-                               (col + 1) * key_size[0], (row + 1) * key_size[1])).copy()
+    for row in range(3):
+        for col in range(5):
+            tile = cover.crop((col * key_w, row * key_h,
+                               (col + 1) * key_w, (row + 1) * key_h)).copy()
             tile.load()
-            encoded = PILHelper.to_native_format(deck, tile)
-            logger.debug("Encoded artwork tile %d: %d bytes", row * 2 + col, len(encoded))
-            tiles.append(encoded)
+            tiles.append(PILHelper.to_native_format(deck, tile))
     return tiles
 
 
@@ -139,11 +138,12 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
     deck.set_key_callback(on_key_change)
 
     last_playing = None
+    has_artwork = False
     last_art_url = None
     failed_art_retry_at = 0.0
 
     async def refresh_feedback() -> None:
-        nonlocal last_playing, last_art_url, failed_art_retry_at
+        nonlocal last_playing, last_art_url, failed_art_retry_at, has_artwork
         timeout = aiohttp.ClientTimeout(total=6)
         async with aiohttp.ClientSession(timeout=timeout) as http:
             while True:
@@ -153,11 +153,13 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
                     now_playing = status.get("now_playing") or {}
                     playing = playback == "playing"
                     if playing != last_playing:
-                        deck.set_key_image(1, _transport_image(deck, playing))
+                        if not has_artwork:
+                            deck.set_key_image(1, _transport_image(deck, playing))
                         last_playing = playing
-                    show(5, playback.upper())
-                    show(6, str(now_playing.get("title") or "")[:16])
-                    show(7, str(now_playing.get("artist") or "")[:16])
+                    if not has_artwork:
+                        show(5, playback.upper())
+                        show(6, str(now_playing.get("title") or "")[:16])
+                        show(7, str(now_playing.get("artist") or "")[:16])
 
                     art_url = now_playing.get("album_art_url") or ""
                     now = loop.time()
@@ -169,6 +171,7 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
                                     deck.set_key_image(key, tile)
                                     rendered.pop(key, None)
                                 last_art_url = art_url
+                                has_artwork = True
                                 failed_art_retry_at = float("inf")
                             else:
                                 logger.warning("Artwork unavailable; keeping previous cover")
@@ -176,16 +179,18 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
                                 failed_art_retry_at = now + 30.0
                     elif not art_url and last_art_url:
                         last_art_url = None
+                        has_artwork = False
                         failed_art_retry_at = 0.0
                         for key in ART_KEYS:
                             show(key, "")
+                        last_playing = None
                 except asyncio.CancelledError:
                     raise
                 except Exception:
                     logger.warning("Could not refresh Stream Deck playback status",
                                    exc_info=True)
                     show(5, "OFFLINE")
-                    if last_playing is not False:
+                    if last_playing is not False and not has_artwork:
                         deck.set_key_image(1, _transport_image(deck, False))
                         last_playing = False
                 await asyncio.sleep(1.0)
