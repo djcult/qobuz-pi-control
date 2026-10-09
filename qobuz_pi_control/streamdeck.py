@@ -283,6 +283,14 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
                                      f"{(seconds // 60) % 60:02d}:{seconds % 60:02d}")
                     # Qobuz metadata quality, not an ALSA-confirmed output format.
                     quality = str(now_playing.get("quality") or "")
+                    # Display only the numeric bit-depth/sample-rate portion.
+                    # Examples: "FLAC 24/96" -> "24/96", "24/96 FLAC" -> "24/96".
+                    import re
+                    match = re.search(r"\\b(\\d{1,2})\\s*/\\s*(\\d+(?:\\.\\d+)?)\\b", quality)
+                    if match:
+                        quality = f"{match.group(1)}/{match.group(2)}"
+                    else:
+                        quality = re.sub(r"\\bFLAC\\b", "", quality, flags=re.IGNORECASE).strip()
                     art_url = now_playing.get("album_art_url") or ""
                     now = loop.time()
                     if art_url and (art_url != last_art_url or now >= failed_art_retry_at):
