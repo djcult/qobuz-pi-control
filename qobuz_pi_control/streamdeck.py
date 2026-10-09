@@ -53,12 +53,18 @@ def _transport_image(deck, playing: bool):
 
 def _artwork_tiles(deck, artwork: bytes):
     """Split one square cover into four LCD-sized images."""
-    from PIL import Image, ImageOps
+    from PIL import Image, ImageFile, ImageOps
     from StreamDeck.ImageHelpers import PILHelper
 
-    with Image.open(BytesIO(artwork)) as source:
-        cover = ImageOps.fit(source.convert("RGB"), (2 * deck.key_image_format()["size"][0],
-                                                     2 * deck.key_image_format()["size"][1]))
+    # Some CDN JPEGs lack a few trailing bytes but remain fully decodable.
+    previous = ImageFile.LOAD_TRUNCATED_IMAGES
+    try:
+        ImageFile.LOAD_TRUNCATED_IMAGES = True
+        with Image.open(BytesIO(artwork)) as source:
+            cover = ImageOps.fit(source.convert("RGB"), (2 * deck.key_image_format()["size"][0],
+                                                         2 * deck.key_image_format()["size"][1]))
+    finally:
+        ImageFile.LOAD_TRUNCATED_IMAGES = previous
     width, height = cover.size
     tiles = []
     for row in range(2):
