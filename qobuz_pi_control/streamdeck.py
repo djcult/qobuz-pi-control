@@ -312,13 +312,18 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
                     words = marquee_text.split()
                     title_offset = 0
                     if len(words) > 5:
-                        # 1-second initial hold, 1-second steps, 1-second end hold.
+                        # Faster word marquee: 0.5-second steps, short end holds.
                         elapsed = max(0.0, loop.time() - title_started_at)
                         last_offset = len(words) - 5
-                        cycle = 1.0 + last_offset * 1.0 + 1.0
+                        step_seconds = 0.5
+                        hold_seconds = 0.5
+                        cycle = 2 * hold_seconds + last_offset * step_seconds
                         phase = elapsed % cycle
-                        if phase >= 1.0:
-                            title_offset = min(last_offset, 1 + int(phase - 1.0))
+                        if phase >= hold_seconds:
+                            title_offset = min(
+                                last_offset,
+                                1 + int((phase - hold_seconds) / step_seconds),
+                            )
                     duration = now_playing.get("duration_seconds")
                     position = now_playing.get("position_seconds")
                     remaining = None
@@ -397,7 +402,7 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
                                    exc_info=True)
                     if artwork_bytes is None:
                         show(5, "OFFLINE")
-                await asyncio.sleep(1.0)
+                await asyncio.sleep(0.2)
 
     feedback_task = asyncio.create_task(refresh_feedback())
     try:
