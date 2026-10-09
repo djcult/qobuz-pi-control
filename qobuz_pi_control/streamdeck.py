@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 from io import BytesIO
 import logging
+from pathlib import Path
+import re
 
 import aiohttp
 
@@ -18,6 +20,24 @@ KEY_ACTIONS = {0: "previous", 1: "toggle", 2: "next"}
 ART_KEYS = tuple(range(15))
 # Virtual pixels of physical space between adjacent LCDs; tune to your device.
 ART_GAP_PX = 30
+
+
+def _alsa_sample_rate_khz() -> str | None:
+    """Read the active USB DAC playback rate from ALSA's negotiated hw_params."""
+    # The DAC has appeared as card 3, but card numbers can change after reboot.
+    for pcm in sorted(Path("/proc/asound").glob("card*/pcm*p/sub*/hw_params")):
+        try:
+            params = pcm.read_text()
+            if "closed" in params:
+                continue
+            rate = re.search(r"^rate:\\s*(\\d+)", params, re.MULTILINE)
+            if rate:
+                hz = int(rate.group(1))
+                if 8000 <= hz <= 384000:
+                    return f"{hz / 1000:g}"
+        except OSError:
+            continue
+    return None
 
 
 def _label_image(deck, label: str):
@@ -393,14 +413,16 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
                     quality = str(now_playing.get("quality") or "")
                     # Example: "FLAC Hi-Res (up to 24-bit/96kHz)" -> "24/96".
                     # This is Qobuz's advertised quality, not verified ALSA PCM.
-                    import re
                     bit_match = re.search(
                         r"(16|24|32)\s*(?:-?bit|bits?)?\s*/\s*"
                         r"(44\.1|48|88\.2|96|176\.4|192|352\.8|384)\s*(?:kHz)?",
                         quality, re.IGNORECASE,
                     )
-                    quality = (f"{bit_match.group(1)}/{bit_match.group(2)}"
-                               if bit_match else "")
+                    advertised_bits = bit_match.group(1) if bit_match else ""
+                    actual_rate = _alsa_sample_rate_khz() if playing else None
+                    quality = (f"{advertised_bits}/{actual_rate}" if advertised_bits and actual_rate
+                               else f"{advertised_bits}/{bit_match.group(2)}" if bit_match
+                               else "")
                     art_url = now_playing.get("album_art_url") or ""
                     now = loop.time()
                     if art_url and (art_url != last_art_url or now >= failed_art_retry_at):
