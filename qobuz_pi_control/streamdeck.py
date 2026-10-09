@@ -157,16 +157,16 @@ def _artwork_tiles(deck, artwork: bytes, playing: bool = False,
         x = (index - 10) * (key_w + ART_GAP_PX)
         draw.rounded_rectangle((x + 2, bottom_top + 7, x + key_w - 2,
                                 bottom_top + key_h - 7), radius=8,
-                               fill=(0, 0, 0, 235))
+                               fill=(0, 0, 0, 175))
         scale = 4
         from PIL import Image as PILImage
         text_layer = PILImage.new("RGBA", (key_w * scale, key_h * scale),
                                   (0, 0, 0, 0))
         td = ImageDraw.Draw(text_layer)
         try:
-            font = ImageFont.truetype("DejaVuSans-Bold.ttf", 15 * scale)
+            font = ImageFont.truetype("DejaVuSans-Bold.ttf", 12 * scale)
         except OSError:
-            font = ImageFont.load_default(size=15 * scale)
+            font = ImageFont.load_default(size=12 * scale)
         value = str(value).strip()
         available = (key_w - 10) * scale
         def text_width(candidate):
