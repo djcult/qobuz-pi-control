@@ -16,6 +16,8 @@ logger = logging.getLogger(__name__)
 # Experimental 5x3 full-deck artwork mosaic. Keys 0/1/2 still control playback.
 KEY_ACTIONS = {0: "previous", 1: "toggle", 2: "next"}
 ART_KEYS = tuple(range(15))
+# Virtual pixels of physical space between adjacent LCDs; tune to your device.
+ART_GAP_PX = 18
 
 
 def _label_image(deck, label: str):
@@ -59,15 +61,18 @@ def _artwork_tiles(deck, artwork: bytes, playing: bool = False):
     with Image.open(BytesIO(artwork)) as source:
         source.load()
         key_w, key_h = deck.key_image_format()["size"]
-        cover = ImageOps.fit(source.convert("RGB"), (5 * key_w, 3 * key_h))
+        canvas_w = 5 * key_w + 4 * ART_GAP_PX
+        canvas_h = 3 * key_h + 2 * ART_GAP_PX
+        cover = ImageOps.fit(source.convert("RGB"), (canvas_w, canvas_h))
         cover.load()
 
     tiles = []
     for row in range(3):
         for col in range(5):
             index = row * 5 + col
-            tile = cover.crop((col * key_w, row * key_h,
-                               (col + 1) * key_w, (row + 1) * key_h)).copy()
+            x = col * (key_w + ART_GAP_PX)
+            y = row * (key_h + ART_GAP_PX)
+            tile = cover.crop((x, y, x + key_w, y + key_h)).copy()
             tile.load()
             if index in KEY_ACTIONS:
                 # Dark translucent disc preserves the artwork behind the icon.
