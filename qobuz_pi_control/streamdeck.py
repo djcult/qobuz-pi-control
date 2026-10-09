@@ -54,7 +54,7 @@ def _transport_image(deck, playing: bool):
 
 
 def _artwork_tiles(deck, artwork: bytes, playing: bool = False,
-                   metadata=("", "", ""), remaining=None, progress=None, quality="", show_overlays=True, title_offset=0):
+                   metadata=("", "", ""), remaining=None, progress=None, quality="", show_overlays=True, title_offset=0, track_word_count=0):
     """Compose one continuous 5x3 canvas, then omit the physical button gaps."""
     from PIL import Image, ImageOps, ImageDraw, ImageFont
     from StreamDeck.ImageHelpers import PILHelper
@@ -65,7 +65,7 @@ def _artwork_tiles(deck, artwork: bytes, playing: bool = False,
     with Image.open(BytesIO(artwork)) as source:
         source.load()
         cover = ImageOps.fit(source.convert("RGB"), (canvas_w, canvas_h)).convert("RGBA")
-    if not show_overlays:
+    if False:  # Artwork-only fast path disabled: marquee remains visible.
         return [
             PILHelper.to_native_format(
                 deck,
@@ -87,7 +87,7 @@ def _artwork_tiles(deck, artwork: bytes, playing: bool = False,
         except OSError:
             return ImageFont.load_default(size=size)
 
-    def centered(text, box, size, max_lines=2):
+    def centered(text, box, size, max_lines=2, color=(255, 255, 255, 255)):
         """Fit text inside a canvas rectangle, shrinking or wrapping as needed."""
         text = str(text or "").strip()
         if not text:
@@ -127,10 +127,10 @@ def _artwork_tiles(deck, artwork: bytes, playing: bool = False,
             bounds = draw.textbbox((0, 0), line, font=font)
             draw.text(((x0 + x1 - (bounds[2] - bounds[0])) // 2,
                        top + i * line_h - bounds[1]), line, font=font,
-                      fill=(255, 255, 255, 255))
+                      fill=color)
 
     # Previous / Play-Pause / Next stay on keys 0, 1 and 2.
-    for index in KEY_ACTIONS:
+    for index in (KEY_ACTIONS if show_overlays else ()):
         cx = index * (key_w + ART_GAP_PX) + key_w // 2
         cy = key_h // 2
         radius = min(key_w, key_h) * .34
@@ -160,16 +160,16 @@ def _artwork_tiles(deck, artwork: bytes, playing: bool = False,
     for slot, word in enumerate(visible):
         col = start_col + slot
         x = col * (key_w + ART_GAP_PX)
+        word_index = title_offset + slot
+        color = ((160, 220, 255, 255) if word_index > track_word_count
+                 else (255, 255, 255, 255))
         centered(word, (x + 2, middle_top + 15, x + key_w - 2,
-                        middle_top + key_h - 13), 19, max_lines=1)
+                        middle_top + key_h - 13), 19, max_lines=1, color=color)
 
     # Bottom row: legible, bold, single-line labels rendered at 4x resolution.
     # Text is deliberately truncated rather than reduced to tiny point sizes.
     bottom_top = 2 * (key_h + ART_GAP_PX)
-    for index, value in (
-        (13, quality),
-        (14, remaining),
-    ):
+    for index, value in (((13, quality), (14, remaining)) if show_overlays else ()):
         if not value:
             continue
         x = (index - 10) * (key_w + ART_GAP_PX)
@@ -272,7 +272,7 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
         show_overlays = not show_overlays
         display_revision += 1
         logger.info("Stream Deck display: %s",
-                    "full controls" if show_overlays else "artwork only")
+                    "full controls" if show_overlays else "marquee and artwork")
 
     def on_key_change(_deck, key: int, state: bool) -> None:
         if state and key == 4:
@@ -306,21 +306,19 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
                     marquee_text = " - ".join(part for part in
                                                (metadata[2], metadata[1]) if part)
                     display_metadata = (metadata[0], metadata[1], marquee_text)
-                    marquee_text = " - ".join(part for part in
-                                               (metadata[2], metadata[1]) if part)
                     if marquee_text != last_title:
                         last_title = marquee_text
                         title_started_at = loop.time()
                     words = marquee_text.split()
                     title_offset = 0
                     if len(words) > 5:
-                        # 2-second initial hold, 1.5 seconds per step, 2-second end hold.
+                        # 1-second initial hold, 1-second steps, 1-second end hold.
                         elapsed = max(0.0, loop.time() - title_started_at)
                         last_offset = len(words) - 5
-                        cycle = 2.0 + last_offset * 1.5 + 2.0
+                        cycle = 1.0 + last_offset * 1.0 + 1.0
                         phase = elapsed % cycle
-                        if phase >= 2.0:
-                            title_offset = min(last_offset, 1 + int((phase - 2.0) / 1.5))
+                        if phase >= 1.0:
+                            title_offset = min(last_offset, 1 + int(phase - 1.0))
                     duration = now_playing.get("duration_seconds")
                     position = now_playing.get("position_seconds")
                     remaining = None
@@ -367,22 +365,20 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
                         state = (last_art_url, playing, display_metadata, remaining, quality, display_revision, title_offset)
                         if state != last_render_state:
                             tiles = _artwork_tiles(deck, artwork_bytes, playing, display_metadata,
-                                                   remaining, None, quality, show_overlays, title_offset)
+                                                   remaining, None, quality, show_overlays, title_offset, len(metadata[2].split()))
                             if last_render_state is None or state[0] != last_render_state[0] or state[5] != last_render_state[5]:
                                 keys = ART_KEYS
                             else:
                                 keys = set()
-                                if not show_overlays:
-                                    keys = set()
                                 if show_overlays and state[1] != last_render_state[1]:
                                     keys.add(1)
-                                if show_overlays and state[2] != last_render_state[2]:
+                                if state[2] != last_render_state[2]:
                                     keys.update((5, 6, 7, 8, 9))
                                 if show_overlays and state[3] != last_render_state[3]:
                                     keys.add(14)
                                 if show_overlays and state[4] != last_render_state[4]:
                                     keys.add(13)
-                                if show_overlays and state[6] != last_render_state[6]:
+                                if state[6] != last_render_state[6]:
                                     keys.update((5, 6, 7, 8, 9))
                             for key in keys:
                                 deck.set_key_image(key, tiles[key])
