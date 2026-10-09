@@ -30,7 +30,7 @@ def _alsa_sample_rate_khz() -> str | None:
             params = pcm.read_text()
             if "closed" in params:
                 continue
-            rate = re.search(r"^rate:\\s*(\\d+)", params, re.MULTILINE)
+            rate = re.search(r"^rate:\s*(\d+)", params, re.MULTILINE)
             if rate:
                 hz = int(rate.group(1))
                 if 8000 <= hz <= 384000:
