@@ -312,21 +312,31 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
                     words = marquee_text.split()
                     title_offset = 0
                     if len(words) > 5:
-                        # Hold the track title on screen before scrolling.
+                        # Pause on the opening words AND when the final track
+                        # word is about to leave the marquee for the album.
                         elapsed = max(0.0, loop.time() - title_started_at)
                         last_offset = len(words) - 5
                         step_seconds = 0.5
                         initial_hold_seconds = 2.5
+                        boundary_hold_seconds = 2.5
                         end_hold_seconds = 0.5
-                        cycle = (initial_hold_seconds
-                                 + last_offset * step_seconds
-                                 + end_hold_seconds)
+                        track_words = len(metadata[2].split())
+                        boundary_offset = min(last_offset, max(0, track_words - 1))
+                        # Build an explicit timeline so the boundary pause
+                        # doesn't disappear into the ordinary 0.5s steps.
+                        phases = [(0, initial_hold_seconds)]
+                        for offset in range(1, last_offset + 1):
+                            phases.append((offset, step_seconds))
+                            if offset == boundary_offset:
+                                phases.append((offset, boundary_hold_seconds))
+                        phases.append((last_offset, end_hold_seconds))
+                        cycle = sum(duration for _, duration in phases)
                         phase = elapsed % cycle
-                        if phase >= initial_hold_seconds:
-                            title_offset = min(
-                                last_offset,
-                                1 + int((phase - initial_hold_seconds) / step_seconds),
-                            )
+                        for offset, duration in phases:
+                            title_offset = offset
+                            if phase < duration:
+                                break
+                            phase -= duration
                     duration = now_playing.get("duration_seconds")
                     position = now_playing.get("position_seconds")
                     remaining = None
