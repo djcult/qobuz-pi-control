@@ -300,16 +300,22 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
     last_render_state = None
     title_started_at = loop.time()
     last_title = None
+    last_now_playing = {}
 
     async def refresh_feedback() -> None:
-        nonlocal artwork_bytes, last_art_url, failed_art_retry_at, last_render_state, title_started_at, last_title
+        nonlocal artwork_bytes, last_art_url, failed_art_retry_at, last_render_state, title_started_at, last_title, last_now_playing
         timeout = aiohttp.ClientTimeout(total=6)
         async with aiohttp.ClientSession(timeout=timeout) as http:
             while True:
                 try:
                     status = await get_status()
                     playback = status.get("status", "disconnected")
-                    now_playing = status.get("now_playing") or {}
+                    reported_now_playing = status.get("now_playing") or {}
+                    # The proxy may briefly omit metadata between tracks.
+                    # Keep the last complete display until fresh data arrives.
+                    if reported_now_playing.get("title"):
+                        last_now_playing = reported_now_playing
+                    now_playing = reported_now_playing or last_now_playing
                     playing = playback == "playing"
                     metadata = tuple(str(now_playing.get(field) or "")
                                      for field in ("artist", "album", "title"))
@@ -370,14 +376,8 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
                         else:
                             last_art_url = art_url
                             failed_art_retry_at = now + 30.0
-                    elif not art_url and last_art_url:
-                        artwork_bytes = None
-                        last_art_url = None
-                        failed_art_retry_at = 0.0
-                        last_render_state = None
-                        rendered.clear()
-                        for key in ART_KEYS:
-                            show(key, "")
+                    # Missing artwork URLs are transient during track changes.
+                    # Never clear the current cover while waiting for the next.
 
                     if artwork_bytes is not None:
                         state = (last_art_url, playing, display_metadata, remaining, quality, display_revision, title_offset)
