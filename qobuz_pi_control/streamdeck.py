@@ -53,7 +53,7 @@ def _transport_image(deck, playing: bool):
     return PILHelper.to_native_format(deck, image)
 
 
-def _artwork_tiles(deck, artwork: bytes, playing: bool = False, metadata=("", "", "")):
+def _artwork_tiles(deck, artwork: bytes, playing: bool = False, metadata=("", "", ""), remaining=None):
     """Render 5x3 cover mosaic with transport glyphs over the first three keys."""
     from PIL import Image, ImageOps, ImageDraw, ImageFont
     from StreamDeck.ImageHelpers import PILHelper
@@ -96,6 +96,18 @@ def _artwork_tiles(deck, artwork: bytes, playing: bool = False, metadata=("", ""
                 else:  # Play
                     draw.polygon([(cx-9, cy-14), (cx-9, cy+14), (cx+15, cy)], fill=white)
                 tile = Image.alpha_composite(rgba, overlay).convert("RGB")
+            if index == 14 and remaining is not None:
+                rgba = tile.convert("RGBA")
+                overlay = Image.new("RGBA", rgba.size, (0, 0, 0, 0))
+                draw = ImageDraw.Draw(overlay)
+                draw.rounded_rectangle((2, key_h // 2 - 14, key_w - 2, key_h // 2 + 14),
+                                       radius=6, fill=(0, 0, 0, 185))
+                font = ImageFont.load_default(size=14)
+                bounds = draw.textbbox((0, 0), remaining, font=font)
+                draw.text(((key_w - (bounds[2] - bounds[0])) // 2,
+                           (key_h - (bounds[3] - bounds[1])) // 2 - bounds[1]),
+                          remaining, font=font, fill="white")
+                tile = Image.alpha_composite(rgba, overlay).convert("RGB")
             if index in (5, 6, 7):
                 from textwrap import wrap
                 value = str(metadata[index - 5] or "")
@@ -135,7 +147,7 @@ def _artwork_tiles(deck, artwork: bytes, playing: bool = False, metadata=("", ""
     return tiles
 
 
-async def _download_artwork(http: aiohttp.ClientSession, deck, url: str, playing: bool = False, metadata=("", "", "")):
+async def _download_artwork(http: aiohttp.ClientSession, deck, url: str, playing: bool = False, metadata=("", "", ""), remaining=None):
     """Fetch and validate artwork before changing any LCD buttons."""
     for attempt in range(2):
         try:
@@ -149,7 +161,7 @@ async def _download_artwork(http: aiohttp.ClientSession, deck, url: str, playing
                 logger.debug("Artwork HTTP %s: content-length=%s, received=%d, JPEG EOI=%s",
                              response.status, response.headers.get("Content-Length"),
                              len(data), data.endswith(b"\\xff\\xd9"))
-            tiles = _artwork_tiles(deck, data, playing, metadata)
+            tiles = _artwork_tiles(deck, data, playing, metadata, remaining)
             _download_artwork._last_bytes = data
             logger.info("Artwork decoded and encoded: %s (%d bytes)", url, len(data))
             return tiles
@@ -202,12 +214,13 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
     last_playing = None
     has_artwork = False
     artwork_bytes = None
+    last_remaining = None
     last_metadata = ("", "", "")
     last_art_url = None
     failed_art_retry_at = 0.0
 
     async def refresh_feedback() -> None:
-        nonlocal last_playing, last_art_url, failed_art_retry_at, has_artwork, artwork_bytes, last_metadata
+        nonlocal last_playing, last_art_url, failed_art_retry_at, has_artwork, artwork_bytes, last_metadata, last_remaining
         timeout = aiohttp.ClientTimeout(total=6)
         async with aiohttp.ClientSession(timeout=timeout) as http:
             while True:
@@ -217,9 +230,15 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
                     now_playing = status.get("now_playing") or {}
                     playing = playback == "playing"
                     metadata = tuple(str(now_playing.get(field) or "") for field in ("artist", "album", "title"))
+                    duration = now_playing.get("duration_seconds")
+                    position = now_playing.get("position_seconds")
+                    remaining = None
+                    if duration is not None and position is not None:
+                        seconds = max(0, int(float(duration) - float(position) + 0.999))
+                        remaining = f"{seconds // 3600:02d}:{(seconds // 60) % 60:02d}:{seconds % 60:02d}"
                     if playing != last_playing:
                         if has_artwork and artwork_bytes is not None:
-                            tiles = _artwork_tiles(deck, artwork_bytes, playing, metadata)
+                            tiles = _artwork_tiles(deck, artwork_bytes, playing, metadata, remaining)
                             deck.set_key_image(1, tiles[1])
                         elif not has_artwork:
                             deck.set_key_image(1, _transport_image(deck, playing))
@@ -229,6 +248,10 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
                         for key in (5, 6, 7):
                             deck.set_key_image(key, tiles[key])
                         last_metadata = metadata
+                    if has_artwork and artwork_bytes is not None and remaining != last_remaining:
+                        tiles = _artwork_tiles(deck, artwork_bytes, playing, metadata, remaining)
+                        deck.set_key_image(14, tiles[14])
+                        last_remaining = remaining
                     if not has_artwork:
                         show(5, playback.upper())
                         show(6, str(now_playing.get("title") or "")[:16])
@@ -238,7 +261,7 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
                     now = loop.time()
                     if art_url and (art_url != last_art_url or now >= failed_art_retry_at):
                         if all(key < deck.key_count() for key in ART_KEYS):
-                            tiles = await _download_artwork(http, deck, art_url, playing, metadata)
+                            tiles = await _download_artwork(http, deck, art_url, playing, metadata, remaining)
                             if tiles is not None:
                                 for key, tile in zip(ART_KEYS, tiles):
                                     deck.set_key_image(key, tile)
@@ -246,6 +269,7 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
                                 last_art_url = art_url
                                 has_artwork = True
                                 last_metadata = metadata
+                                last_remaining = remaining
                                 # Cache the source bytes for dynamic Play/Pause overlays.
                                 artwork_bytes = getattr(_download_artwork, "_last_bytes", None)
                                 failed_art_retry_at = float("inf")
@@ -258,6 +282,7 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
                         has_artwork = False
                         artwork_bytes = None
                         last_metadata = ("", "", "")
+                        last_remaining = None
                         failed_art_retry_at = 0.0
                         for key in ART_KEYS:
                             show(key, "")
