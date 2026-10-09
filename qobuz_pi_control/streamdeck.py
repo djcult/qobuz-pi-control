@@ -163,8 +163,18 @@ def _artwork_tiles(deck, artwork: bytes, playing: bool = False,
         word_index = title_offset + slot
         color = ((160, 220, 255, 255) if word_index > track_word_count
                  else (255, 255, 255, 255))
-        centered(word, (x + 2, middle_top + 15, x + key_w - 2,
-                        middle_top + key_h - 13), 19, max_lines=1, color=color)
+        # Anchor every word to the same typographic centre, rather than
+        # centring its individual glyph bounding box (which shifts words
+        # containing ascenders, descenders or punctuation vertically).
+        word_font = font_at(19)
+        available_width = key_w - 14
+        for point_size in range(19, 9, -1):
+            candidate_font = font_at(point_size)
+            if draw.textbbox((0, 0), word, font=candidate_font)[2] <= available_width:
+                word_font = candidate_font
+                break
+        draw.text((x + key_w // 2, middle_top + key_h // 2),
+                  word, font=word_font, anchor="mm", fill=color)
 
     # Bottom row: legible, bold, single-line labels rendered at 4x resolution.
     # Text is deliberately truncated rather than reduced to tiny point sizes.
