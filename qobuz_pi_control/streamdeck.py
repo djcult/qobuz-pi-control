@@ -142,22 +142,14 @@ def _artwork_tiles(deck, artwork: bytes, playing: bool = False,
                            radius=10, fill=(0, 0, 0, 155))
     centered(metadata[2], (12, middle_top + 14, canvas_w - 12,
                             middle_top + key_h - 28), 28, max_lines=2)
-    if progress is not None:
-        bar_y = middle_top + key_h - 15
-        draw.rounded_rectangle((15, bar_y, canvas_w - 15, bar_y + 5),
-                               radius=2, fill=(220, 220, 220, 100))
-        fill_end = 15 + int((canvas_w - 30) * max(0, min(1, progress)))
-        if fill_end > 15:
-            draw.rounded_rectangle((15, bar_y, fill_end, bar_y + 5),
-                                   radius=2, fill=(255, 255, 255, 240))
 
     # Bottom row: artist, album, open artwork, quality, remaining time.
     bottom_top = 2 * (key_h + ART_GAP_PX)
-    for index, value, label in (
-        (10, metadata[0], "ARTIST"),
-        (11, metadata[1], "ALBUM"),
-        (13, quality, "QUALITY"),
-        (14, remaining, "REMAINING"),
+    for index, value in (
+        (10, metadata[0]),
+        (11, metadata[1]),
+        (13, quality),
+        (14, remaining),
     ):
         if not value:
             continue
@@ -165,10 +157,9 @@ def _artwork_tiles(deck, artwork: bytes, playing: bool = False,
         draw.rounded_rectangle((x + 2, bottom_top + 10, x + key_w - 2,
                                 bottom_top + key_h - 8), radius=8,
                                fill=(0, 0, 0, 180))
+        # Single centred line, with no field label.
         centered(value, (x + 5, bottom_top + 12, x + key_w - 5,
-                         bottom_top + key_h - 28), 14, max_lines=2)
-        centered(label, (x + 5, bottom_top + key_h - 30,
-                         x + key_w - 5, bottom_top + key_h - 9), 9, max_lines=1)
+                         bottom_top + key_h - 10), 14, max_lines=1)
 
     composite = Image.alpha_composite(cover, overlay).convert("RGB")
     tiles = []
@@ -262,14 +253,12 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
                     duration = now_playing.get("duration_seconds")
                     position = now_playing.get("position_seconds")
                     remaining = None
-                    progress = None
                     if duration is not None and position is not None and float(duration) > 0:
                         duration = float(duration)
                         position = max(0.0, min(float(position), duration))
                         seconds = max(0, int(duration - position + 0.999))
                         remaining = (f"{seconds // 3600:02d}:"
                                      f"{(seconds // 60) % 60:02d}:{seconds % 60:02d}")
-                        progress = position / duration
                     # Qobuz metadata quality, not an ALSA-confirmed output format.
                     quality = str(now_playing.get("quality") or "")
                     art_url = now_playing.get("album_art_url") or ""
@@ -294,13 +283,10 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
                             show(key, "")
 
                     if artwork_bytes is not None:
-                        # Round progress to a physical pixel to avoid needless USB updates.
-                        bar_pixels = round((5 * deck.key_image_format()["size"][0]
-                                            + 4 * ART_GAP_PX - 30) * (progress or 0))
-                        state = (last_art_url, playing, metadata, remaining, bar_pixels, quality)
+                        state = (last_art_url, playing, metadata, remaining, quality)
                         if state != last_render_state:
                             tiles = _artwork_tiles(deck, artwork_bytes, playing, metadata,
-                                                   remaining, progress, quality)
+                                                   remaining, None, quality)
                             if last_render_state is None or state[0] != last_render_state[0]:
                                 keys = ART_KEYS
                             else:
@@ -312,8 +298,6 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
                                 if state[3] != last_render_state[3]:
                                     keys.add(14)
                                 if state[4] != last_render_state[4]:
-                                    keys.update((5, 6, 7, 8, 9))
-                                if state[5] != last_render_state[5]:
                                     keys.add(13)
                             for key in keys:
                                 deck.set_key_image(key, tiles[key])
