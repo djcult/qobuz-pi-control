@@ -52,27 +52,54 @@ def _transport_image(deck, playing: bool):
 
 
 def _artwork_tiles(deck, artwork: bytes):
-    """Split one square cover into four LCD-sized images."""
-    from PIL import Image, ImageFile, ImageOps
+    """Strictly decode and split one square cover into four LCD images."""
+    from PIL import Image, ImageOps
     from StreamDeck.ImageHelpers import PILHelper
 
-    # Some CDN JPEGs lack a few trailing bytes but remain fully decodable.
-    previous = ImageFile.LOAD_TRUNCATED_IMAGES
-    try:
-        ImageFile.LOAD_TRUNCATED_IMAGES = True
-        with Image.open(BytesIO(artwork)) as source:
-            cover = ImageOps.fit(source.convert("RGB"), (2 * deck.key_image_format()["size"][0],
-                                                         2 * deck.key_image_format()["size"][1]))
-    finally:
-        ImageFile.LOAD_TRUNCATED_IMAGES = previous
+    with Image.open(BytesIO(artwork)) as source:
+        source.load()  # Reject truncated/corrupt JPEGs before any LCD writes.
+        size = deck.key_image_format()["size"]
+        cover = ImageOps.fit(source.convert("RGB"), (2 * size[0], 2 * size[1]))
     width, height = cover.size
-    tiles = []
-    for row in range(2):
-        for col in range(2):
-            tile = cover.crop((col * width // 2, row * height // 2,
-                               (col + 1) * width // 2, (row + 1) * height // 2))
-            tiles.append(PILHelper.to_native_format(deck, tile))
-    return tiles
+    return [
+        PILHelper.to_native_format(
+            deck,
+            cover.crop((col * width // 2, row * height // 2,
+                        (col + 1) * width // 2, (row + 1) * height // 2)),
+        )
+        for row in range(2) for col in range(2)
+    ]
+
+
+def _artwork_urls(url: str) -> list[str]:
+    """Try the original URL, then a smaller Qobuz cover if applicable."""
+    urls = [url]
+    if "_600." in url:
+        urls.append(url.replace("_600.", "_300."))
+    return urls
+
+
+async def _download_artwork(http: aiohttp.ClientSession, deck, url: str):
+    """Retry each candidate, validating all four tiles before displaying any."""
+    for candidate in _artwork_urls(url):
+        for attempt in range(2):
+            try:
+                async with http.get(candidate) as response:
+                    response.raise_for_status()
+                    if int(response.headers.get("Content-Length", 0)) > 4_000_000:
+                        raise ValueError("Artwork exceeds 4 MB")
+                    data = await response.content.read(4_000_001)
+                    if len(data) > 4_000_000:
+                        raise ValueError("Artwork exceeds 4 MB")
+                tiles = _artwork_tiles(deck, data)
+                logger.info("Artwork decoded: %s (%d bytes)", candidate, len(data))
+                return tiles
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.warning("Artwork attempt %d failed (%s): %s",
+                               attempt + 1, candidate, exc)
+    return None
 
 
 async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None:
@@ -116,9 +143,10 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
 
     last_playing = None
     last_art_url = None
+    failed_art_retry_at = 0.0
 
     async def refresh_feedback() -> None:
-        nonlocal last_playing, last_art_url
+        nonlocal last_playing, last_art_url, failed_art_retry_at
         timeout = aiohttp.ClientTimeout(total=6)
         async with aiohttp.ClientSession(timeout=timeout) as http:
             while True:
@@ -135,25 +163,25 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
                     show(7, str(now_playing.get("artist") or "")[:16])
 
                     art_url = now_playing.get("album_art_url") or ""
-                    if art_url != last_art_url:
-                        last_art_url = art_url
-                        for key in ART_KEYS:
-                            show(key, "")
-                        if art_url and all(key < deck.key_count() for key in ART_KEYS):
-                            try:
-                                async with http.get(art_url) as response:
-                                    response.raise_for_status()
-                                    if int(response.headers.get("Content-Length", 0)) > 4_000_000:
-                                        raise ValueError("Artwork exceeds 4 MB")
-                                    data = await response.content.read(4_000_001)
-                                    if len(data) > 4_000_000:
-                                        raise ValueError("Artwork exceeds 4 MB")
-                                for key, tile in zip(ART_KEYS, _artwork_tiles(deck, data)):
+                    now = loop.time()
+                    if art_url and (art_url != last_art_url or now >= failed_art_retry_at):
+                        if all(key < deck.key_count() for key in ART_KEYS):
+                            tiles = await _download_artwork(http, deck, art_url)
+                            if tiles is not None:
+                                for key, tile in zip(ART_KEYS, tiles):
                                     deck.set_key_image(key, tile)
                                     rendered.pop(key, None)
-                            except Exception:
-                                logger.warning("Unable to load album artwork: %s", art_url,
-                                               exc_info=True)
+                                last_art_url = art_url
+                                failed_art_retry_at = float("inf")
+                            else:
+                                logger.warning("Artwork unavailable; keeping previous cover")
+                                last_art_url = art_url
+                                failed_art_retry_at = now + 30.0
+                    elif not art_url and last_art_url:
+                        last_art_url = None
+                        failed_art_retry_at = 0.0
+                        for key in ART_KEYS:
+                            show(key, "")
                 except asyncio.CancelledError:
                     raise
                 except Exception:
