@@ -54,7 +54,7 @@ def _transport_image(deck, playing: bool):
 
 
 def _artwork_tiles(deck, artwork: bytes, playing: bool = False,
-                   metadata=("", "", ""), remaining=None, progress=None, quality=""):
+                   metadata=("", "", ""), remaining=None, progress=None, quality="", show_overlays=True):
     """Compose one continuous 5x3 canvas, then omit the physical button gaps."""
     from PIL import Image, ImageOps, ImageDraw, ImageFont
     from StreamDeck.ImageHelpers import PILHelper
@@ -65,6 +65,19 @@ def _artwork_tiles(deck, artwork: bytes, playing: bool = False,
     with Image.open(BytesIO(artwork)) as source:
         source.load()
         cover = ImageOps.fit(source.convert("RGB"), (canvas_w, canvas_h)).convert("RGBA")
+    if not show_overlays:
+        return [
+            PILHelper.to_native_format(
+                deck,
+                cover.crop((
+                    col * (key_w + ART_GAP_PX),
+                    row * (key_h + ART_GAP_PX),
+                    col * (key_w + ART_GAP_PX) + key_w,
+                    row * (key_h + ART_GAP_PX) + key_h,
+                )).convert("RGB"),
+            )
+            for row in range(3) for col in range(5)
+        ]
     overlay = Image.new("RGBA", cover.size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
 
@@ -246,9 +259,20 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
         show(key, label)
 
     loop = asyncio.get_running_loop()
+    show_overlays = True
+    display_revision = 0
+
+    def toggle_display() -> None:
+        nonlocal show_overlays, display_revision
+        show_overlays = not show_overlays
+        display_revision += 1
+        logger.info("Stream Deck display: %s",
+                    "full controls" if show_overlays else "artwork only")
 
     def on_key_change(_deck, key: int, state: bool) -> None:
-        if state and (action := KEY_ACTIONS.get(key)):
+        if state and key == 4:
+            loop.call_soon_threadsafe(toggle_display)
+        elif state and (action := KEY_ACTIONS.get(key)):
             loop.call_soon_threadsafe(
                 lambda: asyncio.create_task(dispatch(action))
             )
@@ -315,21 +339,23 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
                             show(key, "")
 
                     if artwork_bytes is not None:
-                        state = (last_art_url, playing, metadata, remaining, quality)
+                        state = (last_art_url, playing, metadata, remaining, quality, display_revision)
                         if state != last_render_state:
                             tiles = _artwork_tiles(deck, artwork_bytes, playing, metadata,
-                                                   remaining, None, quality)
-                            if last_render_state is None or state[0] != last_render_state[0]:
+                                                   remaining, None, quality, show_overlays)
+                            if last_render_state is None or state[0] != last_render_state[0] or state[5] != last_render_state[5]:
                                 keys = ART_KEYS
                             else:
                                 keys = set()
-                                if state[1] != last_render_state[1]:
+                                if not show_overlays:
+                                    keys = set()
+                                if show_overlays and state[1] != last_render_state[1]:
                                     keys.add(1)
-                                if state[2] != last_render_state[2]:
+                                if show_overlays and state[2] != last_render_state[2]:
                                     keys.update((5, 6, 7, 8, 9, 10, 11))
-                                if state[3] != last_render_state[3]:
+                                if show_overlays and state[3] != last_render_state[3]:
                                     keys.add(14)
-                                if state[4] != last_render_state[4]:
+                                if show_overlays and state[4] != last_render_state[4]:
                                     keys.add(13)
                             for key in keys:
                                 deck.set_key_image(key, tiles[key])
