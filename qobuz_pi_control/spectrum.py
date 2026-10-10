@@ -11,11 +11,9 @@ import random
 from pathlib import Path
 
 from PIL import Image, ImageDraw
+from .display import COLUMNS, ROWS, GAP, canvas_size, slice_tiles
 
 BANDS = 64
-COLUMNS = 5
-ROWS = 3
-GAP = 30
 
 
 class Spectrum:
@@ -80,8 +78,7 @@ def render_canvas(spectrum: Spectrum, key_size: tuple[int, int] = (72, 72),
                   gap: int = GAP) -> Image.Image:
     """Render one logical canvas; tile gaps are excluded when sliced."""
     kw, kh = key_size
-    width = COLUMNS * kw + (COLUMNS - 1) * gap
-    height = ROWS * kh + (ROWS - 1) * gap
+    width, height = canvas_size(key_size, gap)
     image = Image.new("RGB", (width, height), (3, 3, 5))
     draw = ImageDraw.Draw(image)
     margin = 9
@@ -101,16 +98,6 @@ def render_canvas(spectrum: Spectrum, key_size: tuple[int, int] = (72, 72),
         draw.line((x - bar_width // 2, peak_y, x + bar_width // 2, peak_y),
                   fill=peak_color, width=2)
     return image
-
-
-def slice_tiles(canvas: Image.Image, key_size: tuple[int, int],
-                gap: int = GAP) -> list[Image.Image]:
-    kw, kh = key_size
-    return [
-        canvas.crop((col * (kw + gap), row * (kh + gap),
-                     col * (kw + gap) + kw, row * (kh + gap) + kh))
-        for row in range(ROWS) for col in range(COLUMNS)
-    ]
 
 
 def run_streamdeck(fps: float = 5.0) -> None:
