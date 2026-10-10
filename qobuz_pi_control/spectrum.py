@@ -113,11 +113,52 @@ def slice_tiles(canvas: Image.Image, key_size: tuple[int, int],
     ]
 
 
+def run_streamdeck(fps: float = 5.0) -> None:
+    """Exclusive standalone hardware demo; does not start Qobuz or ALSA."""
+    import time
+    from StreamDeck.DeviceManager import DeviceManager
+    from StreamDeck.ImageHelpers import PILHelper
+
+    decks = DeviceManager().enumerate()
+    if not decks:
+        raise RuntimeError("No Stream Deck found")
+    deck = decks[0]
+    deck.open()
+    try:
+        deck.reset()
+        deck.set_brightness(65)
+        key_size = deck.key_image_format()["size"]
+        spectrum = Spectrum()
+        start = time.monotonic()
+        frame = 0
+        print("Simulated spectrum running. Press Ctrl+C to exit.", flush=True)
+        while True:
+            tick = time.monotonic()
+            spectrum.update(simulated_bands(tick - start))
+            canvas = render_canvas(spectrum, key_size)
+            for key, tile in enumerate(slice_tiles(canvas, key_size)):
+                deck.set_key_image(key, PILHelper.to_native_format(deck, tile))
+            frame += 1
+            remaining = (start + frame / fps) - time.monotonic()
+            if remaining > 0:
+                time.sleep(remaining)
+    finally:
+        deck.reset()
+        deck.close()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Preview simulated spectrum (no hardware access)")
     parser.add_argument("--output", type=Path, default=Path("/tmp/spectrum.png"))
     parser.add_argument("--key-size", type=int, default=72)
+    parser.add_argument("--streamdeck", action="store_true", help="Run live simulated animation on USB Stream Deck")
+    parser.add_argument("--fps", type=float, default=5.0)
     args = parser.parse_args()
+    if args.streamdeck:
+        if args.fps <= 0:
+            parser.error("--fps must be positive")
+        run_streamdeck(args.fps)
+        return
     spectrum = Spectrum()
     for frame in range(30):
         spectrum.update(simulated_bands(frame / 8))
