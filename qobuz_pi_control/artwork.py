@@ -6,9 +6,10 @@ from __future__ import annotations
 
 from io import BytesIO
 
+from .display import GAP as ART_GAP_PX, canvas_size, slice_tiles
+
 # Keep physical-key layout consistent with the controller.
 KEY_ACTIONS = {0: "previous", 1: "toggle", 2: "next"}
-ART_GAP_PX = 30
 
 def _label_image(deck, label: str):
     from PIL import ImageDraw, ImageFont
@@ -50,8 +51,7 @@ def _artwork_tiles(deck, artwork: bytes, playing: bool = False,
     from StreamDeck.ImageHelpers import PILHelper
 
     key_w, key_h = deck.key_image_format()["size"]
-    canvas_w = 5 * key_w + 4 * ART_GAP_PX
-    canvas_h = 3 * key_h + 2 * ART_GAP_PX
+    canvas_w, canvas_h = canvas_size((key_w, key_h))
     with Image.open(BytesIO(artwork)) as source:
         source.load()
         cover = ImageOps.fit(source.convert("RGB"), (canvas_w, canvas_h)).convert("RGBA")
@@ -239,14 +239,4 @@ def _artwork_tiles(deck, artwork: bytes, playing: bool = False,
         overlay.alpha_composite(text_layer, (x, bottom_top))
 
     composite = Image.alpha_composite(cover, overlay).convert("RGB")
-    tiles = []
-    for row in range(3):
-        for col in range(5):
-            x = col * (key_w + ART_GAP_PX)
-            y = row * (key_h + ART_GAP_PX)
-            tile = composite.crop((x, y, x + key_w, y + key_h)).copy()
-            tile.load()
-            tiles.append(PILHelper.to_native_format(deck, tile))
-    return tiles
-
-
+    return [PILHelper.to_native_format(deck, tile) for tile in slice_tiles(composite, (key_w, key_h))]
