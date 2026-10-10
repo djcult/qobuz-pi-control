@@ -12,7 +12,8 @@ import aiohttp
 
 from .config import StreamDeckConfig
 from .artwork import _label_image, _artwork_tiles, _transport_image
-from .spectrum import Spectrum, simulated_bands, render_canvas, slice_tiles
+from .spectrum import Spectrum, simulated_bands, render_canvas
+from .display import TileDisplay, slice_tiles
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +79,7 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
     deck.open()
     deck.reset()
     deck.set_brightness(max(0, min(config.brightness, 100)))
+    display = TileDisplay(deck)
     logger.info("Stream Deck: %s", deck.get_serial_number())
 
     rendered: dict[int, str] = {}
@@ -102,6 +104,7 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
         display_mode = (display_mode + 1) % 4
         display_revision += 1
         last_render_state = None
+        display.invalidate()
         logger.info("Stream Deck display mode: %s",
                     ("artwork + all info", "artwork + title",
                      "spectrum + title", "spectrum only")[display_mode])
@@ -243,8 +246,7 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
                                 draw.text((x + kw // 2, band_y + kh // 2),
                                           fitted, font=font, anchor="mm", fill=color)
                             canvas = Image.alpha_composite(canvas.convert("RGBA"), overlay).convert("RGB")
-                        for key, tile in enumerate(slice_tiles(canvas, deck.key_image_format()["size"])):
-                            deck.set_key_image(key, PILHelper.to_native_format(deck, tile))
+                        display.show(slice_tiles(canvas, deck.key_image_format()["size"]))
                         last_render_state = None
                     elif artwork_bytes is not None:
                         show_overlays = display_mode == 0
@@ -252,22 +254,7 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
                         if state != last_render_state:
                             tiles = _artwork_tiles(deck, artwork_bytes, playing, display_metadata,
                                                    remaining, None, quality, show_overlays, title_offset, len(metadata[2].split()))
-                            if last_render_state is None or state[0] != last_render_state[0] or state[5] != last_render_state[5]:
-                                keys = ART_KEYS
-                            else:
-                                keys = set()
-                                if show_overlays and state[1] != last_render_state[1]:
-                                    keys.add(1)
-                                if state[2] != last_render_state[2]:
-                                    keys.update((5, 6, 7, 8, 9))
-                                if show_overlays and state[3] != last_render_state[3]:
-                                    keys.add(14)
-                                if show_overlays and state[4] != last_render_state[4]:
-                                    keys.add(13)
-                                if state[6] != last_render_state[6]:
-                                    keys.update((5, 6, 7, 8, 9))
-                            for key in keys:
-                                deck.set_key_image(key, tiles[key])
+                            display.show_native(tiles)
                             last_render_state = state
                     else:
                         show(0, "PREV")
