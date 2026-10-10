@@ -12,6 +12,7 @@ import aiohttp
 
 from .config import StreamDeckConfig
 from .artwork import _label_image, _artwork_tiles, _transport_image
+from .spectrum import Spectrum, simulated_bands, render_canvas, slice_tiles
 
 logger = logging.getLogger(__name__)
 
@@ -91,15 +92,19 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
         show(key, label)
 
     loop = asyncio.get_running_loop()
-    show_overlays = True
+    display_mode = 0
     display_revision = 0
+    spectrum = Spectrum()
+    spectrum_started = loop.time()
 
     def toggle_display() -> None:
-        nonlocal show_overlays, display_revision
-        show_overlays = not show_overlays
+        nonlocal display_mode, display_revision, last_render_state
+        display_mode = (display_mode + 1) % 4
         display_revision += 1
-        logger.info("Stream Deck display: %s",
-                    "full controls" if show_overlays else "marquee and artwork")
+        last_render_state = None
+        logger.info("Stream Deck display mode: %s",
+                    ("artwork + all info", "artwork + title",
+                     "spectrum + title", "spectrum only")[display_mode])
 
     def on_key_change(_deck, key: int, state: bool) -> None:
         if state and key == 4:
@@ -198,7 +203,51 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
                     # Missing artwork URLs are transient during track changes.
                     # Never clear the current cover while waiting for the next.
 
-                    if artwork_bytes is not None:
+                    if display_mode >= 2:
+                        # Simulated spectrum until the non-blocking PCM tap is ready.
+                        from PIL import Image, ImageDraw, ImageFont
+                        from StreamDeck.ImageHelpers import PILHelper
+                        spectrum.update(simulated_bands(loop.time() - spectrum_started))
+                        canvas = render_canvas(spectrum, deck.key_image_format()["size"])
+                        if display_mode == 2:
+                            # Same five-key marquee positions as the artwork renderer.
+                            kw, kh = deck.key_image_format()["size"]
+                            gap = 30
+                            band_y = kh + gap
+                            overlay = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+                            draw = ImageDraw.Draw(overlay)
+                            draw.rounded_rectangle(
+                                (0, band_y + 12, canvas.width, band_y + kh - 8),
+                                radius=10, fill=(0, 0, 0, 155))
+                            visible = words[title_offset:title_offset + 5]
+                            start_col = (5 - len(visible)) // 2 if len(words) <= 5 else 0
+                            for slot, word in enumerate(visible):
+                                col = start_col + slot
+                                x = col * (kw + gap)
+                                font = None
+                                for size in range(19, 5, -1):
+                                    candidate = ImageFont.truetype("DejaVuSans.ttf", size)
+                                    bounds = draw.textbbox((0, 0), word, font=candidate)
+                                    if bounds[2] - bounds[0] <= kw - 12:
+                                        font = candidate
+                                        break
+                                if font is None:
+                                    font = ImageFont.truetype("DejaVuSans.ttf", 6)
+                                # Truncate only extreme words that cannot fit at 6pt.
+                                fitted = word
+                                while fitted and draw.textbbox((0, 0), fitted, font=font)[2] > kw - 12:
+                                    fitted = fitted[:-1]
+                                color = ((160, 220, 255, 255)
+                                         if title_offset + slot >= len(metadata[2].split())
+                                         else (255, 255, 255, 255))
+                                draw.text((x + kw // 2, band_y + kh // 2),
+                                          fitted, font=font, anchor="mm", fill=color)
+                            canvas = Image.alpha_composite(canvas.convert("RGBA"), overlay).convert("RGB")
+                        for key, tile in enumerate(slice_tiles(canvas, deck.key_image_format()["size"])):
+                            deck.set_key_image(key, PILHelper.to_native_format(deck, tile))
+                        last_render_state = None
+                    elif artwork_bytes is not None:
+                        show_overlays = display_mode == 0
                         state = (last_art_url, playing, display_metadata, remaining, quality, display_revision, title_offset)
                         if state != last_render_state:
                             tiles = _artwork_tiles(deck, artwork_bytes, playing, display_metadata,
@@ -234,7 +283,7 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
                                    exc_info=True)
                     if artwork_bytes is None:
                         show(5, "OFFLINE")
-                await asyncio.sleep(0.2)
+                await asyncio.sleep(1 / 15 if display_mode >= 2 else 0.2)
 
     feedback_task = asyncio.create_task(refresh_feedback())
     try:
