@@ -34,6 +34,17 @@ class TileDisplay:
     def invalidate(self) -> None:
         self.previous = [None] * (COLUMNS * ROWS)
 
+    def show_native(self, tiles: list[bytes]) -> int:
+        if len(tiles) != len(self.previous):
+            raise ValueError("Expected 15 tiles")
+        changed = 0
+        for index, native in enumerate(tiles):
+            if native != self.previous[index]:
+                self.deck.set_key_image(index, native)
+                self.previous[index] = native
+                changed += 1
+        return changed
+
     def show(self, tiles: list[Image.Image]) -> int:
         from StreamDeck.ImageHelpers import PILHelper
         if len(tiles) != len(self.previous):
