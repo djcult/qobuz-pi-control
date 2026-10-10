@@ -11,7 +11,7 @@ import re
 import aiohttp
 
 from .config import StreamDeckConfig
-from .artwork import _label_image, _artwork_tiles
+from .artwork import _label_image, _artwork_tiles, _transport_image
 
 logger = logging.getLogger(__name__)
 
