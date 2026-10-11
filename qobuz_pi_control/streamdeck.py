@@ -274,7 +274,7 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
                             draw.text((x + kw // 2, band_y + kh // 2),
                                       fitted, font=font, anchor="mm", fill=color)
                         canvas = Image.alpha_composite(canvas.convert("RGBA"), overlay).convert("RGB")
-                    display.show(slice_tiles(canvas, deck.key_image_format()["size"]))
+                    await asyncio.to_thread(display.show, slice_tiles(canvas, deck.key_image_format()["size"]))
                     last_render_state = None
                 elif artwork_bytes is not None:
                     show_overlays = display_mode == 0
@@ -282,7 +282,7 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
                     if state != last_render_state:
                         tiles = _artwork_tiles(deck, artwork_bytes, playing, display_metadata,
                                                remaining, None, quality, show_overlays, title_offset, len(metadata[2].split()))
-                        display.show_native(tiles)
+                        await asyncio.to_thread(display.show_native, tiles)
                         last_render_state = state
                 else:
                     show(0, "PREV")
