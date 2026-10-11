@@ -14,7 +14,7 @@ import socket
 import struct
 
 logger = logging.getLogger(__name__)
-HEADER = struct.Struct("<4sBBBIH")
+HEADER = struct.Struct("<4sBBBIH")  # legacy v1\nHEADER_V2 = struct.Struct("<4sBBBIHd")
 SOCKET_PATH = "/tmp/qobuz-pcm.sock"
 
 
@@ -28,10 +28,10 @@ def fft_bands(packet: bytes, bands: int = 64) -> list[float] | None:
     if magic != b"QPCM" or version != 1 or channels not in (1, 2) or bits not in (16, 24, 32):
         return None
     width = (bits + 7) // 8
-    expected = HEADER.size + frames * channels * width
+    expected = header.size + frames * channels * width
     if not frames or len(packet) != expected or rate < 8000 or rate > 384000:
         return None
-    payload = memoryview(packet)[HEADER.size:]
+    payload = memoryview(packet)[header.size:]
     if bits == 16:
         samples = np.frombuffer(payload, dtype="<i2").reshape(-1, channels).astype(np.float64) / 32768
     elif bits == 32:
