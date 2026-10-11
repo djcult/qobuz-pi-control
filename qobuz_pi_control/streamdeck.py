@@ -228,7 +228,13 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
                     r"(16|24|32)\s*(?:-?bit|bits?)?\s*/\s*"
                     r"(44\.1|48|88\.2|96|176\.4|192|352\.8|384)\s*(?:kHz)?",
                     quality, re.IGNORECASE,
-                   if display_mode >= 2:
+                )
+                advertised_bits = bit_match.group(1) if bit_match else ""
+                actual_rate = _alsa_sample_rate_khz() if playing else None
+                quality = (f"{advertised_bits}/{actual_rate}" if advertised_bits and actual_rate
+                           else f"{advertised_bits}/{bit_match.group(2)}" if bit_match
+                           else "")
+                if display_mode >= 2:
                     # Simulated spectrum until the non-blocking PCM tap is ready.
                     from PIL import Image, ImageDraw, ImageFont
                     from StreamDeck.ImageHelpers import PILHelper
