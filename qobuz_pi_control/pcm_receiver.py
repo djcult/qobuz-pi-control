@@ -54,7 +54,13 @@ def fft_bands(packet: bytes, bands: int = 64) -> list[float] | None:
     values = []
     for lo, hi in zip(edges[:-1], edges[1:]):
         selected = spectrum[(freqs >= lo) & (freqs < hi)]
-        # Narrow bass bands may have no bin centre even with a long window.\n        # Use the nearest bin instead of displaying a permanently dead bar.\n        if not selected.size:\n            midpoint = math.sqrt(lo * hi)\n            nearest = int(np.argmin(np.abs(freqs - midpoint)))\n            selected = spectrum[nearest:nearest + 1]\n        values.append(float(selected.max()))
+        # Narrow bass bands may have no bin centre even with a long window.
+        # Use the nearest bin instead of displaying a permanently dead bar.
+        if not selected.size:
+            midpoint = math.sqrt(lo * hi)
+            nearest = int(np.argmin(np.abs(freqs - midpoint)))
+            selected = spectrum[nearest:nearest + 1]
+        values.append(float(selected.max()))
     # Fixed logarithmic dB scale; silence stays at zero, no AGC pumping.
     return [max(0.0, min(1.0, (20 * math.log10(v + 1e-9) + 78) / 72)) for v in values]
 
@@ -70,7 +76,7 @@ async def receive_spectrum(latest: dict, path: str = SOCKET_PATH) -> None:
         logger.info("PCM spectrum receiver listening on %s", path)
         loop = asyncio.get_running_loop()
         while True:
-            packet = await loop.sock_recv(sock, 16384)
+            packet = await loop.sock_recv(sock, 65536)
             try:
                 values = fft_bands(packet)
                 if values is not None:
