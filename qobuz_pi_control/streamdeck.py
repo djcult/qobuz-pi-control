@@ -253,7 +253,10 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
                         pcm_latest["display_at"] = loop.time()
                     fresh = loop.time() - pcm_latest.get("display_at", -1e9) < 0.3
                     levels = pcm_latest.get("display_bands") if fresh and playing else None
-                    spectrum.update(levels if levels is not None else [0.0] * len(spectrum.levels))
+                    # Scale visual height only; the decoded audio and FFT stay unchanged.
+                    targets = ([min(1.0, value * config.spectrum_gain) for value in levels]
+                               if levels is not None else [0.0] * len(spectrum.levels))
+                    spectrum.update(targets)
                     canvas = render_canvas(spectrum, deck.key_image_format()["size"])
                     if display_mode == 2:
                         # Same five-key marquee positions as the artwork renderer.
