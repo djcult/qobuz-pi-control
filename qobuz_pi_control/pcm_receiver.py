@@ -14,7 +14,8 @@ import socket
 import struct
 
 logger = logging.getLogger(__name__)
-HEADER = struct.Struct("<4sBBBIH")  # legacy v1\nHEADER_V2 = struct.Struct("<4sBBBIHd")
+HEADER = struct.Struct("<4sBBBIH")  # legacy v1
+HEADER_V2 = struct.Struct("<4sBBBIHd")
 SOCKET_PATH = "/tmp/qobuz-pcm.sock"
 
 
@@ -25,7 +26,10 @@ def fft_bands(packet: bytes, bands: int = 64) -> list[float] | None:
     if len(packet) < HEADER.size:
         return None
     magic, version, channels, bits, rate, frames = HEADER.unpack_from(packet)
-    if magic != b"QPCM" or version != 1 or channels not in (1, 2) or bits not in (16, 24, 32):
+    header = HEADER_V2 if version == 2 else HEADER
+    if len(packet) < header.size:
+        return None
+    if magic != b"QPCM" or version not in (1, 2) or channels not in (1, 2) or bits not in (16, 24, 32):
         return None
     width = (bits + 7) // 8
     expected = header.size + frames * channels * width
@@ -80,8 +84,15 @@ async def receive_spectrum(latest: dict, path: str = SOCKET_PATH) -> None:
             try:
                 values = fft_bands(packet)
                 if values is not None:
-                    latest["bands"] = values
-                    latest["at"] = loop.time()
+                    now = loop.time()
+                    presentation = HEADER_V2.unpack_from(packet)[-1] if packet[4] == 2 else now
+                    if not math.isfinite(presentation) or abs(presentation - now) > 5:
+                        continue
+                    queue = latest.setdefault("queue", [])
+                    queue.append((presentation, values))
+                    if len(queue) > 64:
+                        del queue[:-64]
+                    latest["at"] = now
             except Exception:
                 logger.debug("Discarded invalid PCM monitor packet", exc_info=True)
     finally:
