@@ -127,21 +127,62 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
     last_title = None
     last_now_playing = {}
 
-    async def refresh_feedback() -> None:
-        nonlocal artwork_bytes, last_art_url, failed_art_retry_at, last_render_state, title_started_at, last_title, last_now_playing
+    # Network polling never waits on Stream Deck USB transfers. Rendering uses the
+    # most recently published status, including while artwork is downloading.
+    latest_status: dict = {}
+    status_error = False
+    last_render_state = None
+    frame_count = 0
+    frame_total_seconds = 0.0
+    frame_max_seconds = 0.0
+    frame_report_at = loop.time()
+
+    async def poll_status() -> None:
+        nonlocal artwork_bytes, last_art_url, failed_art_retry_at, last_now_playing, latest_status, status_error
         timeout = aiohttp.ClientTimeout(total=6)
         async with aiohttp.ClientSession(timeout=timeout) as http:
             while True:
                 try:
-                    status = await get_status()
+                    status = await get_status()\n                    latest_status = status\n                    status_error = False
                     playback = status.get("status", "disconnected")
                     reported_now_playing = status.get("now_playing") or {}
-                    # The proxy may briefly omit metadata between tracks.
-                    # Keep the last complete display until fresh data arrives.
+                    # Keep complete metadata across transient track transitions.
                     if reported_now_playing.get("title"):
                         last_now_playing = reported_now_playing
                     now_playing = reported_now_playing or last_now_playing
                     playing = playback == "playing"
+                    art_url = now_playing.get("album_art_url") or ""
+                    now = loop.time()
+                    if art_url and (art_url != last_art_url or now >= failed_art_retry_at):
+                        data = await _download_artwork(http, art_url)
+                        if data is not None:
+                            artwork_bytes = data
+                            last_art_url = art_url
+                            failed_art_retry_at = float("inf")
+                        else:
+                            last_art_url = art_url
+                            failed_art_retry_at = now + 30.0
+                    # Missing artwork URLs are transient during track changes.
+                    # Never clear the current cover while waiting for the next.
+
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    status_error = True
+                    logger.warning("Could not poll Qobuz status", exc_info=True)
+                await asyncio.sleep(0.3)
+
+    async def render_feedback() -> None:
+        nonlocal last_render_state, title_started_at, last_title
+        nonlocal frame_count, frame_total_seconds, frame_max_seconds, frame_report_at
+        # Yield between frames; status polling runs as a separate coroutine.
+        while True:
+            frame_started = loop.time()
+            try:
+                status = latest_status
+                playback = status.get("status", "disconnected")
+                now_playing = status.get("now_playing") or last_now_playing
+                playing = playback == "playing"
                     metadata = tuple(str(now_playing.get(field) or "")
                                      for field in ("artist", "album", "title"))
                     marquee_text = " - ".join(part for part in
@@ -185,28 +226,7 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
                         r"(16|24|32)\s*(?:-?bit|bits?)?\s*/\s*"
                         r"(44\.1|48|88\.2|96|176\.4|192|352\.8|384)\s*(?:kHz)?",
                         quality, re.IGNORECASE,
-                    )
-                    advertised_bits = bit_match.group(1) if bit_match else ""
-                    actual_rate = _alsa_sample_rate_khz() if playing else None
-                    quality = (f"{advertised_bits}/{actual_rate}" if advertised_bits and actual_rate
-                               else f"{advertised_bits}/{bit_match.group(2)}" if bit_match
-                               else "")
-                    art_url = now_playing.get("album_art_url") or ""
-                    now = loop.time()
-                    if art_url and (art_url != last_art_url or now >= failed_art_retry_at):
-                        data = await _download_artwork(http, art_url)
-                        if data is not None:
-                            artwork_bytes = data
-                            last_art_url = art_url
-                            failed_art_retry_at = float("inf")
-                            last_render_state = None
-                        else:
-                            last_art_url = art_url
-                            failed_art_retry_at = now + 30.0
-                    # Missing artwork URLs are transient during track changes.
-                    # Never clear the current cover while waiting for the next.
-
-                    if display_mode >= 2:
+                       if display_mode >= 2:
                         # Simulated spectrum until the non-blocking PCM tap is ready.
                         from PIL import Image, ImageDraw, ImageFont
                         from StreamDeck.ImageHelpers import PILHelper
@@ -263,20 +283,35 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
                         show(6, str(now_playing.get("title") or "")[:16])
                         show(7, str(now_playing.get("artist") or "")[:16])
                         deck.set_key_image(1, _transport_image(deck, playing))
-                except asyncio.CancelledError:
-                    raise
-                except Exception:
-                    logger.warning("Could not refresh Stream Deck playback status",
-                                   exc_info=True)
-                    if artwork_bytes is None:
-                        show(5, "OFFLINE")
-                await asyncio.sleep(1 / 15 if display_mode >= 2 else 0.2)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.warning("Could not render Stream Deck feedback", exc_info=True)
+                if artwork_bytes is None and status_error:
+                    show(5, "OFFLINE")
+            elapsed = loop.time() - frame_started
+            frame_count += 1
+            frame_total_seconds += elapsed
+            frame_max_seconds = max(frame_max_seconds, elapsed)
+            if loop.time() - frame_report_at >= 10.0:
+                window = loop.time() - frame_report_at
+                logger.info("Stream Deck render: %.1f FPS, mean %.1f ms, max %.1f ms, %s mode",
+                            frame_count / window, frame_total_seconds / frame_count * 1000,
+                            frame_max_seconds * 1000, display_mode)
+                frame_report_at = loop.time()
+                frame_count = 0
+                frame_total_seconds = 0.0
+                frame_max_seconds = 0.0
+            target = 1 / 15 if display_mode >= 2 else 0.2
+            await asyncio.sleep(max(0, target - elapsed))
 
-    feedback_task = asyncio.create_task(refresh_feedback())
+    poll_task = asyncio.create_task(poll_status())
+    feedback_task = asyncio.create_task(render_feedback())
     try:
         await asyncio.Event().wait()
     finally:
         feedback_task.cancel()
-        await asyncio.gather(feedback_task, return_exceptions=True)
+        poll_task.cancel()
+        await asyncio.gather(feedback_task, poll_task, return_exceptions=True)
         deck.reset()
         deck.close()
