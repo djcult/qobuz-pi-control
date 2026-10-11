@@ -242,11 +242,10 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
                     # Render the latest real PCM FFT, or silence when unavailable.
                     from PIL import Image, ImageDraw, ImageFont
                     from StreamDeck.ImageHelpers import PILHelper
-                    # Display the most recent frame whose ALSA presentation
-                    # time is due, allowing 40 ms for Stream Deck USB rendering.
+                    # Display analysed PCM after the configured receiver-side delay.
                     queue = pcm_latest.get("queue", [])
                     due = None
-                    target_time = loop.time() + 0.04 - spectrum_delay_ms / 1000.0
+                    target_time = loop.time() - spectrum_delay_ms / 1000.0
                     while queue and queue[0][0] <= target_time:
                         due = queue.pop(0)[1]
                     if due is not None:
