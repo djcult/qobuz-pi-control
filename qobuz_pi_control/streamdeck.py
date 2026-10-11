@@ -143,7 +143,9 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
         async with aiohttp.ClientSession(timeout=timeout) as http:
             while True:
                 try:
-                    status = await get_status()\n                    latest_status = status\n                    status_error = False
+                    status = await get_status()
+                    latest_status = status
+                    status_error = False
                     playback = status.get("status", "disconnected")
                     reported_now_playing = status.get("now_playing") or {}
                     # Keep complete metadata across transient track transitions.
@@ -183,106 +185,106 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
                 playback = status.get("status", "disconnected")
                 now_playing = status.get("now_playing") or last_now_playing
                 playing = playback == "playing"
-                    metadata = tuple(str(now_playing.get(field) or "")
-                                     for field in ("artist", "album", "title"))
-                    marquee_text = " - ".join(part for part in
-                                               (metadata[2], metadata[1]) if part)
-                    display_metadata = (metadata[0], metadata[1], marquee_text)
-                    if marquee_text != last_title:
-                        last_title = marquee_text
-                        title_started_at = loop.time()
-                    words = marquee_text.split()
-                    title_offset = 0
-                    if len(words) > 5:
-                        # Hold the opening five words for 3 seconds before scrolling.
-                        elapsed = max(0.0, loop.time() - title_started_at)
-                        last_offset = len(words) - 5
-                        step_seconds = 0.5
-                        initial_hold_seconds = 3.0
-                        end_hold_seconds = 0.5
-                        cycle = (initial_hold_seconds
-                                 + last_offset * step_seconds
-                                 + end_hold_seconds)
-                        phase = elapsed % cycle
-                        if phase >= initial_hold_seconds:
-                            title_offset = min(
-                                last_offset,
-                                1 + int((phase - initial_hold_seconds) / step_seconds),
-                            )
-                    duration = now_playing.get("duration_seconds")
-                    position = now_playing.get("position_seconds")
-                    remaining = None
-                    if duration is not None and position is not None and float(duration) > 0:
-                        duration = float(duration)
-                        position = max(0.0, min(float(position), duration))
-                        seconds = max(0, int(duration - position + 0.999))
-                        remaining = (f"{seconds // 3600:02d}:"
-                                     f"{(seconds // 60) % 60:02d}:{seconds % 60:02d}")
-                    # Qobuz metadata quality, not an ALSA-confirmed output format.
-                    quality = str(now_playing.get("quality") or "")
-                    # Example: "FLAC Hi-Res (up to 24-bit/96kHz)" -> "24/96".
-                    # This is Qobuz's advertised quality, not verified ALSA PCM.
-                    bit_match = re.search(
-                        r"(16|24|32)\s*(?:-?bit|bits?)?\s*/\s*"
-                        r"(44\.1|48|88\.2|96|176\.4|192|352\.8|384)\s*(?:kHz)?",
-                        quality, re.IGNORECASE,
-                       if display_mode >= 2:
-                        # Simulated spectrum until the non-blocking PCM tap is ready.
-                        from PIL import Image, ImageDraw, ImageFont
-                        from StreamDeck.ImageHelpers import PILHelper
-                        spectrum.update(simulated_bands(loop.time() - spectrum_started))
-                        canvas = render_canvas(spectrum, deck.key_image_format()["size"])
-                        if display_mode == 2:
-                            # Same five-key marquee positions as the artwork renderer.
-                            kw, kh = deck.key_image_format()["size"]
-                            gap = 30
-                            band_y = kh + gap
-                            overlay = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
-                            draw = ImageDraw.Draw(overlay)
-                            draw.rounded_rectangle(
-                                (0, band_y + 12, canvas.width, band_y + kh - 8),
-                                radius=10, fill=(0, 0, 0, 155))
-                            visible = words[title_offset:title_offset + 5]
-                            start_col = (5 - len(visible)) // 2 if len(words) <= 5 else 0
-                            for slot, word in enumerate(visible):
-                                col = start_col + slot
-                                x = col * (kw + gap)
-                                font = None
-                                for size in range(19, 5, -1):
-                                    candidate = ImageFont.truetype("DejaVuSans.ttf", size)
-                                    bounds = draw.textbbox((0, 0), word, font=candidate)
-                                    if bounds[2] - bounds[0] <= kw - 12:
-                                        font = candidate
-                                        break
-                                if font is None:
-                                    font = ImageFont.truetype("DejaVuSans.ttf", 6)
-                                # Truncate only extreme words that cannot fit at 6pt.
-                                fitted = word
-                                while fitted and draw.textbbox((0, 0), fitted, font=font)[2] > kw - 12:
-                                    fitted = fitted[:-1]
-                                color = ((160, 220, 255, 255)
-                                         if title_offset + slot >= len(metadata[2].split())
-                                         else (255, 255, 255, 255))
-                                draw.text((x + kw // 2, band_y + kh // 2),
-                                          fitted, font=font, anchor="mm", fill=color)
-                            canvas = Image.alpha_composite(canvas.convert("RGBA"), overlay).convert("RGB")
-                        display.show(slice_tiles(canvas, deck.key_image_format()["size"]))
-                        last_render_state = None
-                    elif artwork_bytes is not None:
-                        show_overlays = display_mode == 0
-                        state = (last_art_url, playing, display_metadata, remaining, quality, display_revision, title_offset)
-                        if state != last_render_state:
-                            tiles = _artwork_tiles(deck, artwork_bytes, playing, display_metadata,
-                                                   remaining, None, quality, show_overlays, title_offset, len(metadata[2].split()))
-                            display.show_native(tiles)
-                            last_render_state = state
-                    else:
-                        show(0, "PREV")
-                        show(2, "NEXT")
-                        show(5, playback.upper())
-                        show(6, str(now_playing.get("title") or "")[:16])
-                        show(7, str(now_playing.get("artist") or "")[:16])
-                        deck.set_key_image(1, _transport_image(deck, playing))
+                metadata = tuple(str(now_playing.get(field) or "")
+                                 for field in ("artist", "album", "title"))
+                marquee_text = " - ".join(part for part in
+                                           (metadata[2], metadata[1]) if part)
+                display_metadata = (metadata[0], metadata[1], marquee_text)
+                if marquee_text != last_title:
+                    last_title = marquee_text
+                    title_started_at = loop.time()
+                words = marquee_text.split()
+                title_offset = 0
+                if len(words) > 5:
+                    # Hold the opening five words for 3 seconds before scrolling.
+                    elapsed = max(0.0, loop.time() - title_started_at)
+                    last_offset = len(words) - 5
+                    step_seconds = 0.5
+                    initial_hold_seconds = 3.0
+                    end_hold_seconds = 0.5
+                    cycle = (initial_hold_seconds
+                             + last_offset * step_seconds
+                             + end_hold_seconds)
+                    phase = elapsed % cycle
+                    if phase >= initial_hold_seconds:
+                        title_offset = min(
+                            last_offset,
+                            1 + int((phase - initial_hold_seconds) / step_seconds),
+                        )
+                duration = now_playing.get("duration_seconds")
+                position = now_playing.get("position_seconds")
+                remaining = None
+                if duration is not None and position is not None and float(duration) > 0:
+                    duration = float(duration)
+                    position = max(0.0, min(float(position), duration))
+                    seconds = max(0, int(duration - position + 0.999))
+                    remaining = (f"{seconds // 3600:02d}:"
+                                 f"{(seconds // 60) % 60:02d}:{seconds % 60:02d}")
+                # Qobuz metadata quality, not an ALSA-confirmed output format.
+                quality = str(now_playing.get("quality") or "")
+                # Example: "FLAC Hi-Res (up to 24-bit/96kHz)" -> "24/96".
+                # This is Qobuz's advertised quality, not verified ALSA PCM.
+                bit_match = re.search(
+                    r"(16|24|32)\s*(?:-?bit|bits?)?\s*/\s*"
+                    r"(44\.1|48|88\.2|96|176\.4|192|352\.8|384)\s*(?:kHz)?",
+                    quality, re.IGNORECASE,
+                   if display_mode >= 2:
+                    # Simulated spectrum until the non-blocking PCM tap is ready.
+                    from PIL import Image, ImageDraw, ImageFont
+                    from StreamDeck.ImageHelpers import PILHelper
+                    spectrum.update(simulated_bands(loop.time() - spectrum_started))
+                    canvas = render_canvas(spectrum, deck.key_image_format()["size"])
+                    if display_mode == 2:
+                        # Same five-key marquee positions as the artwork renderer.
+                        kw, kh = deck.key_image_format()["size"]
+                        gap = 30
+                        band_y = kh + gap
+                        overlay = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+                        draw = ImageDraw.Draw(overlay)
+                        draw.rounded_rectangle(
+                            (0, band_y + 12, canvas.width, band_y + kh - 8),
+                            radius=10, fill=(0, 0, 0, 155))
+                        visible = words[title_offset:title_offset + 5]
+                        start_col = (5 - len(visible)) // 2 if len(words) <= 5 else 0
+                        for slot, word in enumerate(visible):
+                            col = start_col + slot
+                            x = col * (kw + gap)
+                            font = None
+                            for size in range(19, 5, -1):
+                                candidate = ImageFont.truetype("DejaVuSans.ttf", size)
+                                bounds = draw.textbbox((0, 0), word, font=candidate)
+                                if bounds[2] - bounds[0] <= kw - 12:
+                                    font = candidate
+                                    break
+                            if font is None:
+                                font = ImageFont.truetype("DejaVuSans.ttf", 6)
+                            # Truncate only extreme words that cannot fit at 6pt.
+                            fitted = word
+                            while fitted and draw.textbbox((0, 0), fitted, font=font)[2] > kw - 12:
+                                fitted = fitted[:-1]
+                            color = ((160, 220, 255, 255)
+                                     if title_offset + slot >= len(metadata[2].split())
+                                     else (255, 255, 255, 255))
+                            draw.text((x + kw // 2, band_y + kh // 2),
+                                      fitted, font=font, anchor="mm", fill=color)
+                        canvas = Image.alpha_composite(canvas.convert("RGBA"), overlay).convert("RGB")
+                    display.show(slice_tiles(canvas, deck.key_image_format()["size"]))
+                    last_render_state = None
+                elif artwork_bytes is not None:
+                    show_overlays = display_mode == 0
+                    state = (last_art_url, playing, display_metadata, remaining, quality, display_revision, title_offset)
+                    if state != last_render_state:
+                        tiles = _artwork_tiles(deck, artwork_bytes, playing, display_metadata,
+                                               remaining, None, quality, show_overlays, title_offset, len(metadata[2].split()))
+                        display.show_native(tiles)
+                        last_render_state = state
+                else:
+                    show(0, "PREV")
+                    show(2, "NEXT")
+                    show(5, playback.upper())
+                    show(6, str(now_playing.get("title") or "")[:16])
+                    show(7, str(now_playing.get("artist") or "")[:16])
+                    deck.set_key_image(1, _transport_image(deck, playing))
             except asyncio.CancelledError:
                 raise
             except Exception:
