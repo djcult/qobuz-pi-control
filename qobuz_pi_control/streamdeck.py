@@ -12,7 +12,8 @@ import aiohttp
 
 from .config import StreamDeckConfig
 from .artwork import _label_image, _artwork_tiles, _transport_image
-from .spectrum import Spectrum, simulated_bands, render_canvas
+from .spectrum import Spectrum, render_canvas
+from .pcm_receiver import receive_spectrum
 from .display import TileDisplay, slice_tiles
 
 logger = logging.getLogger(__name__)
@@ -98,7 +99,7 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
     display_mode = 0
     display_revision = 0
     spectrum = Spectrum()
-    spectrum_started = loop.time()
+    pcm_latest: dict = {}
 
     def toggle_display() -> None:
         nonlocal display_mode, display_revision, last_render_state
@@ -236,10 +237,11 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
                            else f"{advertised_bits}/{bit_match.group(2)}" if bit_match
                            else "")
                 if display_mode >= 2:
-                    # Simulated spectrum until the non-blocking PCM tap is ready.
+                    # Render the latest real PCM FFT, or silence when unavailable.
                     from PIL import Image, ImageDraw, ImageFont
                     from StreamDeck.ImageHelpers import PILHelper
-                    spectrum.update(simulated_bands(loop.time() - spectrum_started))
+                    fresh = loop.time() - pcm_latest.get('at', -1e9) < 0.3
+                    spectrum.update(pcm_latest['bands'] if fresh and playing else [0.0] * len(spectrum.levels))
                     canvas = render_canvas(spectrum, deck.key_image_format()["size"])
                     if display_mode == 2:
                         # Same five-key marquee positions as the artwork renderer.
@@ -314,6 +316,7 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
             target = 1 / config.spectrum_fps if display_mode >= 2 else 0.2
             await asyncio.sleep(max(0, target - elapsed))
 
+    receiver_task = asyncio.create_task(receive_spectrum(pcm_latest))
     poll_task = asyncio.create_task(poll_status())
     feedback_task = asyncio.create_task(render_feedback())
     try:
@@ -321,6 +324,7 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
     finally:
         feedback_task.cancel()
         poll_task.cancel()
-        await asyncio.gather(feedback_task, poll_task, return_exceptions=True)
+        receiver_task.cancel()
+        await asyncio.gather(feedback_task, poll_task, receiver_task, return_exceptions=True)
         deck.reset()
         deck.close()
