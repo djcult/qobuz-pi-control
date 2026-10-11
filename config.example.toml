@@ -17,3 +17,4 @@ pause = "KEY_F17"
 enabled = true
 device = "auto"
 brightness = 35
+spectrum_fps = 15  # Try 20, 25, or 30 for benchmarking
