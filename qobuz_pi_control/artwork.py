@@ -169,7 +169,7 @@ def _artwork_tiles(deck, artwork: bytes, playing: bool = False,
         col = start_col + slot
         x = col * (key_w + ART_GAP_PX)
         word_index = title_offset + slot
-        color = ((160, 220, 255, 255) if word_index > track_word_count
+        color = ((160, 220, 255, 255) if word_index >= track_word_count
                  else (255, 255, 255, 255))
         # Anchor every word to the same typographic centre, rather than
         # centring its individual glyph bounding box (which shifts words
