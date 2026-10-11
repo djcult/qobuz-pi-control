@@ -80,7 +80,8 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
     deck.reset()
     deck.set_brightness(max(0, min(config.brightness, 100)))
     display = TileDisplay(deck)
-    logger.info("Stream Deck: %s", deck.get_serial_number())
+    logger.info("Stream Deck: %s (spectrum target %.1f FPS)",
+                deck.get_serial_number(), config.spectrum_fps)
 
     rendered: dict[int, str] = {}
 
@@ -310,7 +311,7 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
                 frame_count = 0
                 frame_total_seconds = 0.0
                 frame_max_seconds = 0.0
-            target = 1 / 15 if display_mode >= 2 else 0.2
+            target = 1 / config.spectrum_fps if display_mode >= 2 else 0.2
             await asyncio.sleep(max(0, target - elapsed))
 
     poll_task = asyncio.create_task(poll_status())
