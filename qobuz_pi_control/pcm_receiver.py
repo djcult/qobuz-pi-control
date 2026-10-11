@@ -65,7 +65,7 @@ def fft_bands(packet: bytes, bands: int = 64) -> list[float] | None:
     return [max(0.0, min(1.0, (20 * math.log10(v + 1e-9) + 78) / 72)) for v in values]
 
 
-async def receive_spectrum(latest: dict, path: str = SOCKET_PATH) -> None:
+async def receive_spectrum(latest: dict, path: str = SOCKET_PATH, *, bands: int = 64) -> None:
     """Queue analysed bands using receiver arrival time, without blocking the UI."""
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
     sock.setblocking(False)
@@ -78,7 +78,7 @@ async def receive_spectrum(latest: dict, path: str = SOCKET_PATH) -> None:
         while True:
             packet = await loop.sock_recv(sock, 65536)
             try:
-                values = fft_bands(packet)
+                values = fft_bands(packet, bands=bands)
                 if values is not None:
                     now = loop.time()
                     queue = latest.setdefault("queue", [])
