@@ -205,7 +205,7 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
                     last_offset = len(words) - 5
                     step_seconds = 0.5
                     initial_hold_seconds = 3.0
-                    end_hold_seconds = 0.5
+                    end_hold_seconds = 3.0
                     cycle = (initial_hold_seconds
                              + last_offset * step_seconds
                              + end_hold_seconds)
