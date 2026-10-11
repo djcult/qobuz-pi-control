@@ -259,10 +259,11 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
                     spectrum.update(targets)
                     canvas = render_canvas(spectrum, deck.key_image_format()["size"])
                     if display_mode == 2:
-                        # Same five-key marquee positions as the artwork renderer.
+                        # Put the five-key marquee on the top row in spectrum mode.
+                        # Artwork layouts retain their middle-row marquee.
                         kw, kh = deck.key_image_format()["size"]
                         gap = 30
-                        band_y = kh + gap
+                        band_y = 0
                         overlay = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
                         draw = ImageDraw.Draw(overlay)
                         draw.rounded_rectangle(
