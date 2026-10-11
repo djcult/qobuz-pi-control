@@ -98,7 +98,7 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
     loop = asyncio.get_running_loop()
     display_mode = 0
     display_revision = 0
-    spectrum = Spectrum()
+    spectrum = Spectrum(bands=config.spectrum_bands)
     pcm_latest: dict = {}
     spectrum_delay_ms = config.spectrum_delay_ms
     logger.info("Spectrum additional display delay: %.0f ms", spectrum_delay_ms)
@@ -338,7 +338,7 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
             target = 1 / config.spectrum_fps if display_mode >= 2 else 0.2
             await asyncio.sleep(max(0, target - elapsed))
 
-    receiver_task = asyncio.create_task(receive_spectrum(pcm_latest))
+    receiver_task = asyncio.create_task(receive_spectrum(pcm_latest, bands=config.spectrum_bands))
     poll_task = asyncio.create_task(poll_status())
     feedback_task = asyncio.create_task(render_feedback())
     try:
