@@ -18,3 +18,4 @@ enabled = true
 device = "auto"
 brightness = 35
 spectrum_fps = 15  # Try 20, 25, or 30 for benchmarking
+spectrum_delay_ms = 150  # Additional visual delay; tune to match DAC audio (0–2000 ms)
