@@ -21,6 +21,7 @@ enabled = false
 brightness = 42
 spectrum_delay_ms = 250
 spectrum_gain = 1.8
+spectrum_bands = 32
 """
     )
     config = load_config(path)
@@ -31,6 +32,7 @@ spectrum_gain = 1.8
     assert config.streamdeck.brightness == 42
     assert config.streamdeck.spectrum_delay_ms == 250
     assert config.streamdeck.spectrum_gain == 1.8
+    assert config.streamdeck.spectrum_bands == 32
 
 
 def test_spectrum_delay_defaults_and_validation(tmp_path: Path):
@@ -38,10 +40,19 @@ def test_spectrum_delay_defaults_and_validation(tmp_path: Path):
     path.write_text("[streamdeck]\n")
     assert load_config(path).streamdeck.spectrum_delay_ms == 150
     assert load_config(path).streamdeck.spectrum_gain == 1.4
+    assert load_config(path).streamdeck.spectrum_bands == 64
     path.write_text("[streamdeck]\nspectrum_delay_ms = -1\n")
     import pytest
     with pytest.raises(ValueError, match="spectrum_delay_ms"):
         load_config(path)
     path.write_text("[streamdeck]\\nspectrum_gain = 0\\n".replace("\\n", "\n"))
     with pytest.raises(ValueError, match="spectrum_gain"):
+        load_config(path)
+
+
+def test_spectrum_band_validation(tmp_path: Path):
+    import pytest
+    path = tmp_path / "config.toml"
+    path.write_text("[streamdeck]\nspectrum_bands = 48\n")
+    with pytest.raises(ValueError, match="spectrum_bands"):
         load_config(path)
