@@ -273,6 +273,12 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
                         for slot, word in enumerate(visible):
                             col = start_col + slot
                             x = col * (kw + gap)
+                            if title_offset + slot >= len(metadata[2].split()):
+                                # Match the album tint used by the artwork marquee.
+                                draw.rounded_rectangle(
+                                    (x + 2, band_y + 12, x + kw - 2, band_y + kh - 8),
+                                    radius=7, fill=(24, 54, 88, 175),
+                                )
                             font = None
                             for size in range(19, 5, -1):
                                 candidate = ImageFont.truetype("DejaVuSans.ttf", size)
