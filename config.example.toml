@@ -20,3 +20,4 @@ brightness = 35
 spectrum_fps = 15  # Try 20, 25, or 30 for benchmarking
 spectrum_delay_ms = 150  # Additional visual delay; tune to match DAC audio (0–2000 ms)
 spectrum_gain = 1.4  # Visual bar height multiplier (0.1–4.0); 1.0 = original
+spectrum_bands = 64  # Use 32 for wider bars, or 64 for finer detail
