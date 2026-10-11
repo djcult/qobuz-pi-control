@@ -169,6 +169,12 @@ def _artwork_tiles(deck, artwork: bytes, playing: bool = False,
         col = start_col + slot
         x = col * (key_w + ART_GAP_PX)
         word_index = title_offset + slot
+        if word_index >= track_word_count:
+            # Slightly blue translucent backdrop for album words only.
+            draw.rounded_rectangle(
+                (x + 2, middle_top + 12, x + key_w - 2, middle_top + key_h - 8),
+                radius=7, fill=(24, 54, 88, 175),
+            )
         color = ((160, 220, 255, 255) if word_index >= track_word_count
                  else (255, 255, 255, 255))
         # Anchor every word to the same typographic centre, rather than
