@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 from io import BytesIO
 import logging
-import os
 from pathlib import Path
 import re
 
@@ -101,14 +100,7 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
     display_revision = 0
     spectrum = Spectrum()
     pcm_latest: dict = {}
-    # Positive delay holds the spectrum back relative to ALSA presentation time.
-    # Tune without modifying audio playback: QOBUZ_SPECTRUM_DELAY_MS=250
-    try:
-        spectrum_delay_ms = max(0.0, min(2000.0, float(
-            os.environ.get("QOBUZ_SPECTRUM_DELAY_MS", "150")
-        )))
-    except ValueError:
-        spectrum_delay_ms = 150.0
+    spectrum_delay_ms = config.spectrum_delay_ms
     logger.info("Spectrum additional display delay: %.0f ms", spectrum_delay_ms)
 
     def toggle_display() -> None:
