@@ -28,3 +28,10 @@ def test_tone_has_visible_peak():
 def test_invalid_header():
     assert fft_bands(b"invalid") is None
     assert fft_bands(HEADER.pack(b"WRNG", 1, 1, 16, 48000, 1) + b"\x00\x00") is None
+
+
+def test_thirty_two_bands():
+    levels = fft_bands(packet([0] * 1024), bands=32)
+    assert levels is not None
+    assert len(levels) == 32
+    assert max(levels) == 0
