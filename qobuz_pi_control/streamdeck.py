@@ -191,7 +191,7 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
                 playing = playback == "playing"
                 metadata = tuple(str(now_playing.get(field) or "")
                                  for field in ("artist", "album", "title"))
-                marquee_text = " - ".join(part for part in
+                marquee_text = " ".join(part for part in
                                            (metadata[2], metadata[1]) if part)
                 display_metadata = (metadata[0], metadata[1], marquee_text)
                 if marquee_text != last_title:
