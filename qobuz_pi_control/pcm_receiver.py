@@ -14,8 +14,7 @@ import socket
 import struct
 
 logger = logging.getLogger(__name__)
-HEADER = struct.Struct("<4sBBBIH")  # legacy v1
-HEADER_V2 = struct.Struct("<4sBBBIHd")
+HEADER = struct.Struct("<4sBBBIH")
 SOCKET_PATH = "/tmp/qobuz-pcm.sock"
 
 
@@ -26,16 +25,13 @@ def fft_bands(packet: bytes, bands: int = 64) -> list[float] | None:
     if len(packet) < HEADER.size:
         return None
     magic, version, channels, bits, rate, frames = HEADER.unpack_from(packet)
-    header = HEADER_V2 if version == 2 else HEADER
-    if len(packet) < header.size:
-        return None
-    if magic != b"QPCM" or version not in (1, 2) or channels not in (1, 2) or bits not in (16, 24, 32):
+    if magic != b"QPCM" or version != 1 or channels not in (1, 2) or bits not in (16, 24, 32):
         return None
     width = (bits + 7) // 8
-    expected = header.size + frames * channels * width
+    expected = HEADER.size + frames * channels * width
     if not frames or len(packet) != expected or rate < 8000 or rate > 384000:
         return None
-    payload = memoryview(packet)[header.size:]
+    payload = memoryview(packet)[HEADER.size:]
     if bits == 16:
         samples = np.frombuffer(payload, dtype="<i2").reshape(-1, channels).astype(np.float64) / 32768
     elif bits == 32:
@@ -70,7 +66,7 @@ def fft_bands(packet: bytes, bands: int = 64) -> list[float] | None:
 
 
 async def receive_spectrum(latest: dict, path: str = SOCKET_PATH) -> None:
-    """Publish latest bands and receive timestamp without blocking UI rendering."""
+    """Queue analysed bands using receiver arrival time, without blocking the UI."""
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
     sock.setblocking(False)
     try:
@@ -85,11 +81,8 @@ async def receive_spectrum(latest: dict, path: str = SOCKET_PATH) -> None:
                 values = fft_bands(packet)
                 if values is not None:
                     now = loop.time()
-                    presentation = HEADER_V2.unpack_from(packet)[-1] if packet[4] == 2 else now
-                    if not math.isfinite(presentation) or abs(presentation - now) > 5:
-                        continue
                     queue = latest.setdefault("queue", [])
-                    queue.append((presentation, values))
+                    queue.append((now, values))
                     if len(queue) > 64:
                         del queue[:-64]
                     latest["at"] = now
