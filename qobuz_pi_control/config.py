@@ -35,6 +35,7 @@ class StreamDeckConfig:
     brightness: int = 35
     spectrum_fps: float = 15.0
     spectrum_delay_ms: float = 150.0
+    spectrum_gain: float = 1.4
 
 
 @dataclass(slots=True)
@@ -73,6 +74,10 @@ def load_config(path: str | Path) -> Config:
     if not 0 <= spectrum_delay_ms <= 2000:
         raise ValueError("streamdeck.spectrum_delay_ms must be between 0 and 2000")
 
+    spectrum_gain = float(deck_raw.get("spectrum_gain", 1.4))
+    if not 0.1 <= spectrum_gain <= 4.0:
+        raise ValueError("streamdeck.spectrum_gain must be between 0.1 and 4.0")
+
     return Config(
         proxy=ProxyConfig(
             base_url=proxy_raw.get("base_url", "http://127.0.0.1:8689"),
@@ -91,5 +96,6 @@ def load_config(path: str | Path) -> Config:
             brightness=int(deck_raw.get("brightness", 35)),
             spectrum_fps=spectrum_fps,
             spectrum_delay_ms=spectrum_delay_ms,
+            spectrum_gain=spectrum_gain,
         ),
     )
