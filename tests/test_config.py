@@ -20,6 +20,7 @@ next = "KEY_F21"
 enabled = false
 brightness = 42
 spectrum_delay_ms = 250
+spectrum_gain = 1.8
 """
     )
     config = load_config(path)
@@ -29,13 +30,18 @@ spectrum_delay_ms = 250
     assert config.streamdeck.enabled is False
     assert config.streamdeck.brightness == 42
     assert config.streamdeck.spectrum_delay_ms == 250
+    assert config.streamdeck.spectrum_gain == 1.8
 
 
 def test_spectrum_delay_defaults_and_validation(tmp_path: Path):
     path = tmp_path / "config.toml"
     path.write_text("[streamdeck]\n")
     assert load_config(path).streamdeck.spectrum_delay_ms == 150
+    assert load_config(path).streamdeck.spectrum_gain == 1.4
     path.write_text("[streamdeck]\nspectrum_delay_ms = -1\n")
     import pytest
     with pytest.raises(ValueError, match="spectrum_delay_ms"):
+        load_config(path)
+    path.write_text("[streamdeck]\\nspectrum_gain = 0\\n".replace("\\n", "\n"))
+    with pytest.raises(ValueError, match="spectrum_gain"):
         load_config(path)
