@@ -240,8 +240,19 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
                     # Render the latest real PCM FFT, or silence when unavailable.
                     from PIL import Image, ImageDraw, ImageFont
                     from StreamDeck.ImageHelpers import PILHelper
-                    fresh = loop.time() - pcm_latest.get('at', -1e9) < 0.3
-                    spectrum.update(pcm_latest['bands'] if fresh and playing else [0.0] * len(spectrum.levels))
+                    # Display the most recent frame whose ALSA presentation
+                    # time is due, allowing 40 ms for Stream Deck USB rendering.
+                    queue = pcm_latest.get("queue", [])
+                    due = None
+                    target_time = loop.time() + 0.04
+                    while queue and queue[0][0] <= target_time:
+                        due = queue.pop(0)[1]
+                    if due is not None:
+                        pcm_latest["display_bands"] = due
+                        pcm_latest["display_at"] = loop.time()
+                    fresh = loop.time() - pcm_latest.get("display_at", -1e9) < 0.3
+                    levels = pcm_latest.get("display_bands") if fresh and playing else None
+                    spectrum.update(levels if levels is not None else [0.0] * len(spectrum.levels))
                     canvas = render_canvas(spectrum, deck.key_image_format()["size"])
                     if display_mode == 2:
                         # Same five-key marquee positions as the artwork renderer.
