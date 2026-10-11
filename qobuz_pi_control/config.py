@@ -33,6 +33,10 @@ class StreamDeckConfig:
     enabled: bool = True
     device: str = "auto"
     brightness: int = 35
+    spectrum_fps: float = 15.0
+    spectrum_delay_ms: float = 150.0
+    spectrum_gain: float = 1.4
+    spectrum_bands: int = 64
 
 
 @dataclass(slots=True)
@@ -63,6 +67,22 @@ def load_config(path: str | Path) -> Config:
         if name not in reserved and name in {"play_pause", "next", "previous", "play", "pause"}
     }
 
+    spectrum_fps = float(deck_raw.get("spectrum_fps", 15.0))
+    if not 1 <= spectrum_fps <= 60:
+        raise ValueError("streamdeck.spectrum_fps must be between 1 and 60")
+
+    spectrum_delay_ms = float(deck_raw.get("spectrum_delay_ms", 150.0))
+    if not 0 <= spectrum_delay_ms <= 2000:
+        raise ValueError("streamdeck.spectrum_delay_ms must be between 0 and 2000")
+
+    spectrum_gain = float(deck_raw.get("spectrum_gain", 1.4))
+    if not 0.1 <= spectrum_gain <= 4.0:
+        raise ValueError("streamdeck.spectrum_gain must be between 0.1 and 4.0")
+
+    spectrum_bands = int(deck_raw.get("spectrum_bands", 64))
+    if spectrum_bands not in (32, 64):
+        raise ValueError("streamdeck.spectrum_bands must be 32 or 64")
+
     return Config(
         proxy=ProxyConfig(
             base_url=proxy_raw.get("base_url", "http://127.0.0.1:8689"),
@@ -79,5 +99,9 @@ def load_config(path: str | Path) -> Config:
             enabled=bool(deck_raw.get("enabled", True)),
             device=deck_raw.get("device", "auto"),
             brightness=int(deck_raw.get("brightness", 35)),
+            spectrum_fps=spectrum_fps,
+            spectrum_delay_ms=spectrum_delay_ms,
+            spectrum_gain=spectrum_gain,
+            spectrum_bands=spectrum_bands,
         ),
     )

@@ -11,6 +11,10 @@ import re
 import aiohttp
 
 from .config import StreamDeckConfig
+from .artwork import _label_image, _artwork_tiles, _transport_image
+from .spectrum import Spectrum, render_canvas
+from .pcm_receiver import receive_spectrum
+from .display import TileDisplay, slice_tiles
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +23,6 @@ logger = logging.getLogger(__name__)
 KEY_ACTIONS = {0: "previous", 1: "toggle", 2: "next"}
 ART_KEYS = tuple(range(15))
 # Virtual pixels of physical space between adjacent LCDs; tune to your device.
-ART_GAP_PX = 30
 
 
 def _alsa_sample_rate_khz() -> str | None:
@@ -38,246 +41,6 @@ def _alsa_sample_rate_khz() -> str | None:
         except OSError:
             continue
     return None
-
-
-def _label_image(deck, label: str):
-    from PIL import ImageDraw, ImageFont
-    from StreamDeck.ImageHelpers import PILHelper
-
-    image = PILHelper.create_image(deck)
-    draw = ImageDraw.Draw(image)
-    font = ImageFont.load_default(size=16)
-    bounds = draw.textbbox((0, 0), label, font=font)
-    x = (image.width - (bounds[2] - bounds[0])) // 2
-    y = (image.height - (bounds[3] - bounds[1])) // 2
-    draw.text((x, y), label, font=font, fill="white")
-    return PILHelper.to_native_format(deck, image)
-
-
-def _transport_image(deck, playing: bool):
-    """Draw a proper play/pause symbol rather than a text label."""
-    from PIL import ImageDraw
-    from StreamDeck.ImageHelpers import PILHelper
-
-    image = PILHelper.create_image(deck)
-    draw = ImageDraw.Draw(image)
-    w, h = image.size
-    if playing:
-        draw.rounded_rectangle((w * .30, h * .24, w * .43, h * .76),
-                               radius=3, fill="white")
-        draw.rounded_rectangle((w * .57, h * .24, w * .70, h * .76),
-                               radius=3, fill="white")
-    else:
-        draw.polygon([(w * .34, h * .22), (w * .34, h * .78),
-                      (w * .77, h * .50)], fill="white")
-    return PILHelper.to_native_format(deck, image)
-
-
-def _artwork_tiles(deck, artwork: bytes, playing: bool = False,
-                   metadata=("", "", ""), remaining=None, progress=None, quality="", show_overlays=True, title_offset=0, track_word_count=0):
-    """Compose one continuous 5x3 canvas, then omit the physical button gaps."""
-    from PIL import Image, ImageOps, ImageDraw, ImageFont
-    from StreamDeck.ImageHelpers import PILHelper
-
-    key_w, key_h = deck.key_image_format()["size"]
-    canvas_w = 5 * key_w + 4 * ART_GAP_PX
-    canvas_h = 3 * key_h + 2 * ART_GAP_PX
-    with Image.open(BytesIO(artwork)) as source:
-        source.load()
-        cover = ImageOps.fit(source.convert("RGB"), (canvas_w, canvas_h)).convert("RGBA")
-    if False:  # Artwork-only fast path disabled: marquee remains visible.
-        return [
-            PILHelper.to_native_format(
-                deck,
-                cover.crop((
-                    col * (key_w + ART_GAP_PX),
-                    row * (key_h + ART_GAP_PX),
-                    col * (key_w + ART_GAP_PX) + key_w,
-                    row * (key_h + ART_GAP_PX) + key_h,
-                )).convert("RGB"),
-            )
-            for row in range(3) for col in range(5)
-        ]
-    overlay = Image.new("RGBA", cover.size, (0, 0, 0, 0))
-    draw = ImageDraw.Draw(overlay)
-
-    def font_at(size):
-        try:
-            return ImageFont.truetype("DejaVuSans.ttf", size)
-        except OSError:
-            return ImageFont.load_default(size=size)
-
-    def centered(text, box, size, max_lines=2, color=(255, 255, 255, 255)):
-        """Fit text inside a canvas rectangle, shrinking or wrapping as needed."""
-        text = str(text or "").strip()
-        if not text:
-            return
-        x0, y0, x1, y1 = box
-        width = x1 - x0 - 10
-        height = y1 - y0 - 8
-        for point_size in range(size, 9, -1):
-            font = font_at(point_size)
-            words = text.split()
-            lines = []
-            current = ""
-            for word in words:
-                candidate = (current + " " + word).strip()
-                if draw.textbbox((0, 0), candidate, font=font)[2] <= width:
-                    current = candidate
-                else:
-                    if current:
-                        lines.append(current)
-                    current = word
-            if current:
-                lines.append(current)
-            line_h = point_size + 4
-            if len(lines) <= max_lines and len(lines) * line_h <= height and all(
-                draw.textbbox((0, 0), line, font=font)[2] <= width for line in lines
-            ):
-                break
-        else:
-            font = font_at(10)
-            lines = [text]
-            while lines[0] and draw.textbbox((0, 0), lines[0] + "…", font=font)[2] > width:
-                lines[0] = lines[0][:-1]
-            lines[0] += "…"
-            line_h = 14
-        top = (y0 + y1 - len(lines) * line_h) // 2
-        for i, line in enumerate(lines):
-            bounds = draw.textbbox((0, 0), line, font=font)
-            draw.text(((x0 + x1 - (bounds[2] - bounds[0])) // 2,
-                       top + i * line_h - bounds[1]), line, font=font,
-                      fill=color)
-
-    # Minimal, antialiased media controls: conventional skip-back,
-    # play/pause and skip-forward glyphs on subtle circular scrims.
-    if show_overlays:
-        from PIL import Image as PILImage
-        scale = 4
-        icon_size = 48
-        for index in KEY_ACTIONS:
-            cx = index * (key_w + ART_GAP_PX) + key_w // 2
-            cy = key_h // 2
-            glyph = PILImage.new("RGBA", (icon_size * scale, icon_size * scale))
-            gd = ImageDraw.Draw(glyph)
-            def rect(x0, y0, x1, y1, radius=0):
-                bounds = tuple(round(v * scale) for v in (x0, y0, x1, y1))
-                if radius:
-                    gd.rounded_rectangle(bounds, radius=radius * scale, fill="white")
-                else:
-                    gd.rectangle(bounds, fill="white")
-            def triangle(points):
-                gd.polygon([(round(x * scale), round(y * scale)) for x, y in points],
-                           fill="white")
-            if index == 0:  # Previous: point LEFT, with a stop bar.
-                rect(12, 13, 15, 35, radius=1)
-                triangle([(34, 12), (34, 36), (16, 24)])
-            elif index == 2:  # Next: point RIGHT, with a stop bar.
-                triangle([(14, 12), (14, 36), (32, 24)])
-                rect(33, 13, 36, 35, radius=1)
-            elif playing:
-                rect(15, 13, 21, 35, radius=1)
-                rect(27, 13, 33, 35, radius=1)
-            else:
-                triangle([(17, 12), (17, 36), (35, 24)])
-            glyph = glyph.resize((icon_size, icon_size), PILImage.Resampling.LANCZOS)
-            scrim_radius = 25
-            draw.ellipse((cx - scrim_radius, cy - scrim_radius,
-                          cx + scrim_radius, cy + scrim_radius),
-                         fill=(0, 0, 0, 115))
-            overlay.alpha_composite(glyph, (cx - icon_size // 2, cy - icon_size // 2))
-
-    # Five independent word slots on one continuous translucent title band.
-    middle_top = key_h + ART_GAP_PX
-    draw.rounded_rectangle((0, middle_top + 12, canvas_w, middle_top + key_h - 8),
-                           radius=10, fill=(0, 0, 0, 155))
-    words = str(metadata[2] or "").split()
-    visible = words[title_offset:title_offset + 5]
-    # Short titles sit centred as a group; long titles occupy all five slots.
-    start_col = (5 - len(visible)) // 2 if len(words) <= 5 else 0
-    for slot, word in enumerate(visible):
-        col = start_col + slot
-        x = col * (key_w + ART_GAP_PX)
-        word_index = title_offset + slot
-        color = ((160, 220, 255, 255) if word_index > track_word_count
-                 else (255, 255, 255, 255))
-        # Anchor every word to the same typographic centre, rather than
-        # centring its individual glyph bounding box (which shifts words
-        # containing ascenders, descenders or punctuation vertically).
-        # Scale the word to fit its own tile, even for unusually long words.
-        # Do not stop at 10pt: a word wider than that was clipped by the LCD.
-        available_width = key_w - 12
-        word_font = font_at(19)
-        for point_size in range(19, 5, -1):
-            candidate_font = font_at(point_size)
-            bounds = draw.textbbox((0, 0), word, font=candidate_font)
-            if bounds[2] - bounds[0] <= available_width:
-                word_font = candidate_font
-                break
-        else:
-            word_font = font_at(6)
-        bounds = draw.textbbox((0, 0), word, font=word_font)
-        word_width = bounds[2] - bounds[0]
-        if word_width > available_width:
-            # For exceptionally long words, scale the rendered glyphs to
-            # fit without truncation, keeping the same vertical baseline.
-            from PIL import Image as PILImage
-            glyph = PILImage.new("RGBA", (word_width + 4, max(1, bounds[3] - bounds[1] + 4)))
-            glyph_draw = ImageDraw.Draw(glyph)
-            glyph_draw.text((2 - bounds[0], 2 - bounds[1]), word, font=word_font, fill=color)
-            fitted_width = max(1, available_width)
-            glyph = glyph.resize((fitted_width, glyph.height), PILImage.Resampling.LANCZOS)
-            overlay.alpha_composite(glyph, (x + (key_w - fitted_width) // 2,
-                                            middle_top + (key_h - glyph.height) // 2))
-        else:
-            draw.text((x + key_w // 2, middle_top + key_h // 2),
-                      word, font=word_font, anchor="mm", fill=color)
-
-    # Bottom row: legible, bold, single-line labels rendered at 4x resolution.
-    # Text is deliberately truncated rather than reduced to tiny point sizes.
-    bottom_top = 2 * (key_h + ART_GAP_PX)
-    for index, value in (((13, quality), (14, remaining)) if show_overlays else ()):
-        if not value:
-            continue
-        x = (index - 10) * (key_w + ART_GAP_PX)
-        draw.rounded_rectangle((x + 2, bottom_top + 7, x + key_w - 2,
-                                bottom_top + key_h - 7), radius=8,
-                               fill=(0, 0, 0, 110))
-        scale = 4
-        from PIL import Image as PILImage
-        text_layer = PILImage.new("RGBA", (key_w * scale, key_h * scale),
-                                  (0, 0, 0, 0))
-        td = ImageDraw.Draw(text_layer)
-        try:
-            font = ImageFont.truetype("DejaVuSans-Bold.ttf", 12 * scale)
-        except OSError:
-            font = ImageFont.load_default(size=12 * scale)
-        value = str(value).strip()
-        available = (key_w - 10) * scale
-        def text_width(candidate):
-            bb = td.textbbox((0, 0), candidate, font=font)
-            return bb[2] - bb[0]
-        if text_width(value) > available:
-            while value and text_width(value + "…") > available:
-                value = value[:-1]
-            value += "…"
-        bounds = td.textbbox((0, 0), value, font=font)
-        td.text(((key_w * scale - (bounds[2] - bounds[0])) // 2,
-                 (key_h * scale - (bounds[3] - bounds[1])) // 2 - bounds[1]),
-                value, font=font, fill=(255, 255, 255, 255))
-        text_layer = text_layer.resize((key_w, key_h), PILImage.Resampling.LANCZOS)
-        overlay.alpha_composite(text_layer, (x, bottom_top))
-
-    composite = Image.alpha_composite(cover, overlay).convert("RGB")
-    tiles = []
-    for row in range(3):
-        for col in range(5):
-            x = col * (key_w + ART_GAP_PX)
-            y = row * (key_h + ART_GAP_PX)
-            tile = composite.crop((x, y, x + key_w, y + key_h)).copy()
-            tile.load()
-            tiles.append(PILHelper.to_native_format(deck, tile))
-    return tiles
 
 
 async def _download_artwork(http: aiohttp.ClientSession, url: str):
@@ -317,7 +80,9 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
     deck.open()
     deck.reset()
     deck.set_brightness(max(0, min(config.brightness, 100)))
-    logger.info("Stream Deck: %s", deck.get_serial_number())
+    display = TileDisplay(deck)
+    logger.info("Stream Deck: %s (spectrum target %.1f FPS)",
+                deck.get_serial_number(), config.spectrum_fps)
 
     rendered: dict[int, str] = {}
 
@@ -331,15 +96,22 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
         show(key, label)
 
     loop = asyncio.get_running_loop()
-    show_overlays = True
+    display_mode = 0
     display_revision = 0
+    spectrum = Spectrum(bands=config.spectrum_bands)
+    pcm_latest: dict = {}
+    spectrum_delay_ms = config.spectrum_delay_ms
+    logger.info("Spectrum additional display delay: %.0f ms", spectrum_delay_ms)
 
     def toggle_display() -> None:
-        nonlocal show_overlays, display_revision
-        show_overlays = not show_overlays
+        nonlocal display_mode, display_revision, last_render_state
+        display_mode = (display_mode + 1) % 4
         display_revision += 1
-        logger.info("Stream Deck display: %s",
-                    "full controls" if show_overlays else "marquee and artwork")
+        last_render_state = None
+        display.invalidate()
+        logger.info("Stream Deck display mode: %s",
+                    ("artwork + all info", "artwork + title",
+                     "spectrum + title", "spectrum only")[display_mode])
 
     def on_key_change(_deck, key: int, state: bool) -> None:
         if state and key == 4:
@@ -359,70 +131,32 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
     last_title = None
     last_now_playing = {}
 
-    async def refresh_feedback() -> None:
-        nonlocal artwork_bytes, last_art_url, failed_art_retry_at, last_render_state, title_started_at, last_title, last_now_playing
+    # Network polling never waits on Stream Deck USB transfers. Rendering uses the
+    # most recently published status, including while artwork is downloading.
+    latest_status: dict = {}
+    status_error = False
+    last_render_state = None
+    frame_count = 0
+    frame_total_seconds = 0.0
+    frame_max_seconds = 0.0
+    frame_report_at = loop.time()
+
+    async def poll_status() -> None:
+        nonlocal artwork_bytes, last_art_url, failed_art_retry_at, last_now_playing, latest_status, status_error
         timeout = aiohttp.ClientTimeout(total=6)
         async with aiohttp.ClientSession(timeout=timeout) as http:
             while True:
                 try:
                     status = await get_status()
+                    latest_status = status
+                    status_error = False
                     playback = status.get("status", "disconnected")
                     reported_now_playing = status.get("now_playing") or {}
-                    # The proxy may briefly omit metadata between tracks.
-                    # Keep the last complete display until fresh data arrives.
+                    # Keep complete metadata across transient track transitions.
                     if reported_now_playing.get("title"):
                         last_now_playing = reported_now_playing
                     now_playing = reported_now_playing or last_now_playing
                     playing = playback == "playing"
-                    metadata = tuple(str(now_playing.get(field) or "")
-                                     for field in ("artist", "album", "title"))
-                    marquee_text = " - ".join(part for part in
-                                               (metadata[2], metadata[1]) if part)
-                    display_metadata = (metadata[0], metadata[1], marquee_text)
-                    if marquee_text != last_title:
-                        last_title = marquee_text
-                        title_started_at = loop.time()
-                    words = marquee_text.split()
-                    title_offset = 0
-                    if len(words) > 5:
-                        # Hold the opening five words for 3 seconds before scrolling.
-                        elapsed = max(0.0, loop.time() - title_started_at)
-                        last_offset = len(words) - 5
-                        step_seconds = 0.5
-                        initial_hold_seconds = 3.0
-                        end_hold_seconds = 0.5
-                        cycle = (initial_hold_seconds
-                                 + last_offset * step_seconds
-                                 + end_hold_seconds)
-                        phase = elapsed % cycle
-                        if phase >= initial_hold_seconds:
-                            title_offset = min(
-                                last_offset,
-                                1 + int((phase - initial_hold_seconds) / step_seconds),
-                            )
-                    duration = now_playing.get("duration_seconds")
-                    position = now_playing.get("position_seconds")
-                    remaining = None
-                    if duration is not None and position is not None and float(duration) > 0:
-                        duration = float(duration)
-                        position = max(0.0, min(float(position), duration))
-                        seconds = max(0, int(duration - position + 0.999))
-                        remaining = (f"{seconds // 3600:02d}:"
-                                     f"{(seconds // 60) % 60:02d}:{seconds % 60:02d}")
-                    # Qobuz metadata quality, not an ALSA-confirmed output format.
-                    quality = str(now_playing.get("quality") or "")
-                    # Example: "FLAC Hi-Res (up to 24-bit/96kHz)" -> "24/96".
-                    # This is Qobuz's advertised quality, not verified ALSA PCM.
-                    bit_match = re.search(
-                        r"(16|24|32)\s*(?:-?bit|bits?)?\s*/\s*"
-                        r"(44\.1|48|88\.2|96|176\.4|192|352\.8|384)\s*(?:kHz)?",
-                        quality, re.IGNORECASE,
-                    )
-                    advertised_bits = bit_match.group(1) if bit_match else ""
-                    actual_rate = _alsa_sample_rate_khz() if playing else None
-                    quality = (f"{advertised_bits}/{actual_rate}" if advertised_bits and actual_rate
-                               else f"{advertised_bits}/{bit_match.group(2)}" if bit_match
-                               else "")
                     art_url = now_playing.get("album_art_url") or ""
                     now = loop.time()
                     if art_url and (art_url != last_art_url or now >= failed_art_retry_at):
@@ -431,56 +165,188 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
                             artwork_bytes = data
                             last_art_url = art_url
                             failed_art_retry_at = float("inf")
-                            last_render_state = None
                         else:
                             last_art_url = art_url
                             failed_art_retry_at = now + 30.0
                     # Missing artwork URLs are transient during track changes.
                     # Never clear the current cover while waiting for the next.
 
-                    if artwork_bytes is not None:
-                        state = (last_art_url, playing, display_metadata, remaining, quality, display_revision, title_offset)
-                        if state != last_render_state:
-                            tiles = _artwork_tiles(deck, artwork_bytes, playing, display_metadata,
-                                                   remaining, None, quality, show_overlays, title_offset, len(metadata[2].split()))
-                            if last_render_state is None or state[0] != last_render_state[0] or state[5] != last_render_state[5]:
-                                keys = ART_KEYS
-                            else:
-                                keys = set()
-                                if show_overlays and state[1] != last_render_state[1]:
-                                    keys.add(1)
-                                if state[2] != last_render_state[2]:
-                                    keys.update((5, 6, 7, 8, 9))
-                                if show_overlays and state[3] != last_render_state[3]:
-                                    keys.add(14)
-                                if show_overlays and state[4] != last_render_state[4]:
-                                    keys.add(13)
-                                if state[6] != last_render_state[6]:
-                                    keys.update((5, 6, 7, 8, 9))
-                            for key in keys:
-                                deck.set_key_image(key, tiles[key])
-                            last_render_state = state
-                    else:
-                        show(0, "PREV")
-                        show(2, "NEXT")
-                        show(5, playback.upper())
-                        show(6, str(now_playing.get("title") or "")[:16])
-                        show(7, str(now_playing.get("artist") or "")[:16])
-                        deck.set_key_image(1, _transport_image(deck, playing))
                 except asyncio.CancelledError:
                     raise
                 except Exception:
-                    logger.warning("Could not refresh Stream Deck playback status",
-                                   exc_info=True)
-                    if artwork_bytes is None:
-                        show(5, "OFFLINE")
-                await asyncio.sleep(0.2)
+                    status_error = True
+                    logger.warning("Could not poll Qobuz status", exc_info=True)
+                await asyncio.sleep(0.3)
 
-    feedback_task = asyncio.create_task(refresh_feedback())
+    async def render_feedback() -> None:
+        nonlocal last_render_state, title_started_at, last_title
+        nonlocal frame_count, frame_total_seconds, frame_max_seconds, frame_report_at
+        # Yield between frames; status polling runs as a separate coroutine.
+        while True:
+            frame_started = loop.time()
+            try:
+                status = latest_status
+                playback = status.get("status", "disconnected")
+                now_playing = status.get("now_playing") or last_now_playing
+                playing = playback == "playing"
+                metadata = tuple(str(now_playing.get(field) or "")
+                                 for field in ("artist", "album", "title"))
+                marquee_text = " ".join(part for part in
+                                           (metadata[2], metadata[1]) if part)
+                display_metadata = (metadata[0], metadata[1], marquee_text)
+                if marquee_text != last_title:
+                    last_title = marquee_text
+                    title_started_at = loop.time()
+                words = marquee_text.split()
+                title_offset = 0
+                if len(words) > 5:
+                    # Hold the opening five words for 3 seconds before scrolling.
+                    elapsed = max(0.0, loop.time() - title_started_at)
+                    last_offset = len(words) - 5
+                    step_seconds = 0.5
+                    initial_hold_seconds = 3.0
+                    end_hold_seconds = 0.5
+                    cycle = (initial_hold_seconds
+                             + last_offset * step_seconds
+                             + end_hold_seconds)
+                    phase = elapsed % cycle
+                    if phase >= initial_hold_seconds:
+                        title_offset = min(
+                            last_offset,
+                            1 + int((phase - initial_hold_seconds) / step_seconds),
+                        )
+                duration = now_playing.get("duration_seconds")
+                position = now_playing.get("position_seconds")
+                remaining = None
+                if duration is not None and position is not None and float(duration) > 0:
+                    duration = float(duration)
+                    position = max(0.0, min(float(position), duration))
+                    seconds = max(0, int(duration - position + 0.999))
+                    remaining = (f"{seconds // 3600:02d}:"
+                                 f"{(seconds // 60) % 60:02d}:{seconds % 60:02d}")
+                # Qobuz metadata quality, not an ALSA-confirmed output format.
+                quality = str(now_playing.get("quality") or "")
+                # Example: "FLAC Hi-Res (up to 24-bit/96kHz)" -> "24/96".
+                # This is Qobuz's advertised quality, not verified ALSA PCM.
+                bit_match = re.search(
+                    r"(16|24|32)\s*(?:-?bit|bits?)?\s*/\s*"
+                    r"(44\.1|48|88\.2|96|176\.4|192|352\.8|384)\s*(?:kHz)?",
+                    quality, re.IGNORECASE,
+                )
+                advertised_bits = bit_match.group(1) if bit_match else ""
+                actual_rate = _alsa_sample_rate_khz() if playing else None
+                quality = (f"{advertised_bits}/{actual_rate}" if advertised_bits and actual_rate
+                           else f"{advertised_bits}/{bit_match.group(2)}" if bit_match
+                           else "")
+                if display_mode >= 2:
+                    # Render the latest real PCM FFT, or silence when unavailable.
+                    from PIL import Image, ImageDraw, ImageFont
+                    from StreamDeck.ImageHelpers import PILHelper
+                    # Display analysed PCM after the configured receiver-side delay.
+                    queue = pcm_latest.get("queue", [])
+                    due = None
+                    target_time = loop.time() - spectrum_delay_ms / 1000.0
+                    while queue and queue[0][0] <= target_time:
+                        due = queue.pop(0)[1]
+                    if due is not None:
+                        pcm_latest["display_bands"] = due
+                        pcm_latest["display_at"] = loop.time()
+                    fresh = loop.time() - pcm_latest.get("display_at", -1e9) < 0.3
+                    levels = pcm_latest.get("display_bands") if fresh and playing else None
+                    # Scale visual height only; the decoded audio and FFT stay unchanged.
+                    targets = ([min(1.0, value * config.spectrum_gain) for value in levels]
+                               if levels is not None else [0.0] * len(spectrum.levels))
+                    spectrum.update(targets)
+                    canvas = render_canvas(spectrum, deck.key_image_format()["size"])
+                    if display_mode == 2:
+                        # Put the five-key marquee on the top row in spectrum mode.
+                        # Artwork layouts retain their middle-row marquee.
+                        kw, kh = deck.key_image_format()["size"]
+                        gap = 30
+                        band_y = 0
+                        overlay = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+                        draw = ImageDraw.Draw(overlay)
+                        draw.rounded_rectangle(
+                            (0, band_y + 12, canvas.width, band_y + kh - 8),
+                            radius=10, fill=(0, 0, 0, 155))
+                        visible = words[title_offset:title_offset + 5]
+                        start_col = (5 - len(visible)) // 2 if len(words) <= 5 else 0
+                        for slot, word in enumerate(visible):
+                            col = start_col + slot
+                            x = col * (kw + gap)
+                            if title_offset + slot >= len(metadata[2].split()):
+                                # Match the album tint used by the artwork marquee.
+                                draw.rounded_rectangle(
+                                    (x + 2, band_y + 12, x + kw - 2, band_y + kh - 8),
+                                    radius=7, fill=(24, 54, 88, 175),
+                                )
+                            font = None
+                            for size in range(19, 5, -1):
+                                candidate = ImageFont.truetype("DejaVuSans.ttf", size)
+                                bounds = draw.textbbox((0, 0), word, font=candidate)
+                                if bounds[2] - bounds[0] <= kw - 12:
+                                    font = candidate
+                                    break
+                            if font is None:
+                                font = ImageFont.truetype("DejaVuSans.ttf", 6)
+                            # Truncate only extreme words that cannot fit at 6pt.
+                            fitted = word
+                            while fitted and draw.textbbox((0, 0), fitted, font=font)[2] > kw - 12:
+                                fitted = fitted[:-1]
+                            color = ((160, 220, 255, 255)
+                                     if title_offset + slot >= len(metadata[2].split())
+                                     else (255, 255, 255, 255))
+                            draw.text((x + kw // 2, band_y + kh // 2),
+                                      fitted, font=font, anchor="mm", fill=color)
+                        canvas = Image.alpha_composite(canvas.convert("RGBA"), overlay).convert("RGB")
+                    await asyncio.to_thread(display.show, slice_tiles(canvas, deck.key_image_format()["size"]))
+                    last_render_state = None
+                elif artwork_bytes is not None:
+                    show_overlays = display_mode == 0
+                    state = (last_art_url, playing, display_metadata, remaining, quality, display_revision, title_offset)
+                    if state != last_render_state:
+                        tiles = _artwork_tiles(deck, artwork_bytes, playing, display_metadata,
+                                               remaining, None, quality, show_overlays, title_offset, len(metadata[2].split()))
+                        await asyncio.to_thread(display.show_native, tiles)
+                        last_render_state = state
+                else:
+                    show(0, "PREV")
+                    show(2, "NEXT")
+                    show(5, playback.upper())
+                    show(6, str(now_playing.get("title") or "")[:16])
+                    show(7, str(now_playing.get("artist") or "")[:16])
+                    deck.set_key_image(1, _transport_image(deck, playing))
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.warning("Could not render Stream Deck feedback", exc_info=True)
+                if artwork_bytes is None and status_error:
+                    show(5, "OFFLINE")
+            elapsed = loop.time() - frame_started
+            frame_count += 1
+            frame_total_seconds += elapsed
+            frame_max_seconds = max(frame_max_seconds, elapsed)
+            if loop.time() - frame_report_at >= 10.0:
+                window = loop.time() - frame_report_at
+                logger.info("Stream Deck render: %.1f FPS, mean %.1f ms, max %.1f ms, %s mode",
+                            frame_count / window, frame_total_seconds / frame_count * 1000,
+                            frame_max_seconds * 1000, display_mode)
+                frame_report_at = loop.time()
+                frame_count = 0
+                frame_total_seconds = 0.0
+                frame_max_seconds = 0.0
+            target = 1 / config.spectrum_fps if display_mode >= 2 else 0.2
+            await asyncio.sleep(max(0, target - elapsed))
+
+    receiver_task = asyncio.create_task(receive_spectrum(pcm_latest, bands=config.spectrum_bands))
+    poll_task = asyncio.create_task(poll_status())
+    feedback_task = asyncio.create_task(render_feedback())
     try:
         await asyncio.Event().wait()
     finally:
         feedback_task.cancel()
-        await asyncio.gather(feedback_task, return_exceptions=True)
+        poll_task.cancel()
+        receiver_task.cancel()
+        await asyncio.gather(feedback_task, poll_task, receiver_task, return_exceptions=True)
         deck.reset()
         deck.close()

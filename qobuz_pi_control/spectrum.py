@@ -1,0 +1,159 @@
+"""Standalone, simulated full-deck spectrum renderer.
+
+No ALSA access, no USB writes, no changes to the running controller.
+Preview: python -m qobuz_pi_control.spectrum --output /tmp/spectrum.png
+"""
+from __future__ import annotations
+
+import argparse
+import math
+import random
+from pathlib import Path
+
+from PIL import Image, ImageDraw
+from .display import COLUMNS, ROWS, GAP, canvas_size, slice_tiles
+
+BANDS = 64
+
+
+class Spectrum:
+    """Smoothed logarithmic-band levels and slowly falling peak markers."""
+
+    def __init__(self, bands: int = BANDS):
+        self.levels = [0.0] * bands
+        self.peaks = [0.0] * bands
+        self.hold = [0] * bands
+
+    def update(self, targets: list[float]) -> None:
+        if len(targets) != len(self.levels):
+            raise ValueError("Expected one level per band")
+        for i, target in enumerate(targets):
+            target = max(0.0, min(1.0, float(target)))
+            old = self.levels[i]
+            self.levels[i] = old + (0.72 if target > old else 0.15) * (target - old)
+            if self.levels[i] >= self.peaks[i]:
+                self.peaks[i] = self.levels[i]
+                self.hold[i] = 5
+            elif self.hold[i]:
+                self.hold[i] -= 1
+            else:
+                self.peaks[i] = max(self.levels[i], self.peaks[i] - 0.025)
+
+
+def simulated_bands(t: float, bands: int = BANDS) -> list[float]:
+    """A deliberately artificial demo signal, not audio-derived FFT data."""
+    rng = random.Random(int(t * 12))
+    values = []
+    for i in range(bands):
+        x = i / max(1, bands - 1)
+        envelope = 0.12 + 0.68 * math.exp(-((x - 0.37) / 0.32) ** 2)
+        pulse = 0.55 + 0.45 * math.sin(t * 5.3 - i * 0.24) ** 2
+        values.append(min(1.0, envelope * pulse * (0.65 + rng.random() * 0.55)))
+    return values
+
+
+# Muted vintage spectrum palette, low to high frequencies.
+PALETTE = (
+    (0.00, (180, 55, 54)),    # deep red
+    (0.18, (218, 105, 45)),   # orange
+    (0.38, (231, 185, 65)),   # amber
+    (0.57, (111, 188, 96)),   # green
+    (0.78, (73, 181, 185)),   # cyan
+    (1.00, (80, 115, 205)),   # blue
+)
+
+
+def band_color(position: float) -> tuple[int, int, int]:
+    """Interpolate muted colours across log-spaced frequency bands."""
+    position = max(0.0, min(1.0, position))
+    for (left, start), (right, end) in zip(PALETTE, PALETTE[1:]):
+        if position <= right:
+            fraction = (position - left) / (right - left)
+            return tuple(round(a + (b - a) * fraction)
+                         for a, b in zip(start, end))
+    return PALETTE[-1][1]
+
+
+def render_canvas(spectrum: Spectrum, key_size: tuple[int, int] = (72, 72),
+                  gap: int = GAP) -> Image.Image:
+    """Render one logical canvas; tile gaps are excluded when sliced."""
+    kw, kh = key_size
+    width, height = canvas_size(key_size, gap)
+    image = Image.new("RGB", (width, height), (3, 3, 5))
+    draw = ImageDraw.Draw(image)
+    margin = 9
+    usable_height = height - 2 * margin
+    spacing = (width - 2 * margin) / len(spectrum.levels)
+    bar_width = max(2, int(spacing * 0.62))
+    for i, (level, peak) in enumerate(zip(spectrum.levels, spectrum.peaks)):
+        x = round(margin + (i + 0.5) * spacing)
+        color = band_color(i / max(1, len(spectrum.levels) - 1))
+        peak_color = tuple(round(channel + (255 - channel) * 0.48) for channel in color)
+        top = height - margin - round(level * usable_height)
+        bottom = height - margin
+        if bottom > top:
+            draw.rectangle((x - bar_width // 2, top, x + bar_width // 2, bottom),
+                           fill=color)
+        peak_y = height - margin - round(peak * usable_height)
+        draw.line((x - bar_width // 2, peak_y, x + bar_width // 2, peak_y),
+                  fill=peak_color, width=2)
+    return image
+
+
+def run_streamdeck(fps: float = 5.0) -> None:
+    """Exclusive standalone hardware demo; does not start Qobuz or ALSA."""
+    import time
+    from StreamDeck.DeviceManager import DeviceManager
+    from StreamDeck.ImageHelpers import PILHelper
+
+    decks = DeviceManager().enumerate()
+    if not decks:
+        raise RuntimeError("No Stream Deck found")
+    deck = decks[0]
+    deck.open()
+    try:
+        deck.reset()
+        deck.set_brightness(65)
+        key_size = deck.key_image_format()["size"]
+        spectrum = Spectrum()
+        start = time.monotonic()
+        frame = 0
+        print("Simulated spectrum running. Press Ctrl+C to exit.", flush=True)
+        while True:
+            tick = time.monotonic()
+            spectrum.update(simulated_bands(tick - start))
+            canvas = render_canvas(spectrum, key_size)
+            for key, tile in enumerate(slice_tiles(canvas, key_size)):
+                deck.set_key_image(key, PILHelper.to_native_format(deck, tile))
+            frame += 1
+            remaining = (start + frame / fps) - time.monotonic()
+            if remaining > 0:
+                time.sleep(remaining)
+    finally:
+        deck.reset()
+        deck.close()
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Preview simulated spectrum (no hardware access)")
+    parser.add_argument("--output", type=Path, default=Path("/tmp/spectrum.png"))
+    parser.add_argument("--key-size", type=int, default=72)
+    parser.add_argument("--streamdeck", action="store_true", help="Run live simulated animation on USB Stream Deck")
+    parser.add_argument("--fps", type=float, default=5.0)
+    args = parser.parse_args()
+    if args.streamdeck:
+        if args.fps <= 0:
+            parser.error("--fps must be positive")
+        run_streamdeck(args.fps)
+        return
+    spectrum = Spectrum()
+    for frame in range(30):
+        spectrum.update(simulated_bands(frame / 8))
+    canvas = render_canvas(spectrum, (args.key_size, args.key_size))
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    canvas.save(args.output)
+    print(f"Saved simulated spectrum preview to {args.output}")
+
+
+if __name__ == "__main__":
+    main()
