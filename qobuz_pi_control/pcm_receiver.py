@@ -54,7 +54,7 @@ def fft_bands(packet: bytes, bands: int = 64) -> list[float] | None:
     values = []
     for lo, hi in zip(edges[:-1], edges[1:]):
         selected = spectrum[(freqs >= lo) & (freqs < hi)]
-        values.append(float(selected.max()) if selected.size else 0.0)
+        # Narrow bass bands may have no bin centre even with a long window.\n        # Use the nearest bin instead of displaying a permanently dead bar.\n        if not selected.size:\n            midpoint = math.sqrt(lo * hi)\n            nearest = int(np.argmin(np.abs(freqs - midpoint)))\n            selected = spectrum[nearest:nearest + 1]\n        values.append(float(selected.max()))
     # Fixed logarithmic dB scale; silence stays at zero, no AGC pumping.
     return [max(0.0, min(1.0, (20 * math.log10(v + 1e-9) + 78) / 72)) for v in values]
 
