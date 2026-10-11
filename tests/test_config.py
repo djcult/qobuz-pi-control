@@ -19,6 +19,7 @@ next = "KEY_F21"
 [streamdeck]
 enabled = false
 brightness = 42
+spectrum_delay_ms = 250
 """
     )
     config = load_config(path)
@@ -27,3 +28,14 @@ brightness = 42
     assert config.flirc.mappings == {"KEY_F20": "toggle", "KEY_F21": "next"}
     assert config.streamdeck.enabled is False
     assert config.streamdeck.brightness == 42
+    assert config.streamdeck.spectrum_delay_ms == 250
+
+
+def test_spectrum_delay_defaults_and_validation(tmp_path: Path):
+    path = tmp_path / "config.toml"
+    path.write_text("[streamdeck]\n")
+    assert load_config(path).streamdeck.spectrum_delay_ms == 150
+    path.write_text("[streamdeck]\nspectrum_delay_ms = -1\n")
+    import pytest
+    with pytest.raises(ValueError, match="spectrum_delay_ms"):
+        load_config(path)
