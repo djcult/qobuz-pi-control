@@ -20,37 +20,44 @@ Stream Deck (USB HID) ─┘
 - next
 - previous
 
-## Install
+## Install and configure
 
-Requires Python 3.11+.
+Requires Python 3.11+ and `uv`. This fork is deployed alongside
+[`qobuz-proxy`](https://github.com/djcult/qobuz-proxy/blob/alsa-dev/README.md#raspberry-pi-alsa--systemd)
+on the same Raspberry Pi.
 
-```bash
-git clone https://github.com/djcult/qobuz-pi-control.git
-cd qobuz-pi-control
-python -m venv .venv
-. .venv/bin/activate
-pip install -e .
-```
-
-Stream Deck support is optional:
+For a new installation, clone the repository to `~/src/qobuz-pi-control`
+and create the local configuration. If already installed and working, **keep
+your existing `config.toml`**.
 
 ```bash
-pip install -e '.[streamdeck]'
+# New installations only:
+mkdir -p ~/src
+git clone https://github.com/djcult/qobuz-pi-control.git ~/src/qobuz-pi-control
+
+cd ~/src/qobuz-pi-control
+git switch dev
+git pull --ff-only
+uv sync --no-dev --extra streamdeck
+
+# New installations only; edit the file for your Qobuz speaker and hardware:
+cp config.example.toml config.toml
 ```
 
-## Configure
+The default `config.toml` expects the proxy at `127.0.0.1:8689`
+and speaker ID `cdq2`. FLIRC can emit otherwise-unused F13–F17 keys.
+The Stream Deck requires USB/HID access; FLIRC needs `/dev/input/event*`
+access. Arrange udev permissions or appropriate groups for the service user.
 
-Copy `config.example.toml` to `config.toml`. The default assumes qobuz-proxy is on the same Pi at port 8689 and the speaker id is `cdq2`.
-
-FLIRC should be configured to emit otherwise-unused keys (F13-F17 by default). This makes the FLIRC appear as an ordinary Linux keyboard while keeping its mappings away from normal typing.
-
-## Run
+To test the controller manually **before** enabling systemd:
 
 ```bash
-qobuz-pi-control --config config.toml
+cd ~/src/qobuz-pi-control
+.venv/bin/qobuz-pi-control --config config.toml
 ```
 
-Use `--no-flirc` or `--no-streamdeck` to disable an adapter.
+The `--no-flirc` and `--no-streamdeck` flags disable individual adapters.
+Stop the manual process before starting the systemd service.
 
 ## Raspberry Pi systemd service
 
