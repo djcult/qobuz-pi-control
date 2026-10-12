@@ -1,15 +1,24 @@
+# Raspberry Pi system service template (see README.md).
+# Replace @USER@ and @HOME@ before installing; do not run this template as-is.
 [Unit]
-Description=Qobuz Pi physical controls
+Description=Qobuz Stream Deck and FLIRC Controller
+Wants=network-online.target qobuz-proxy.service
 After=network-online.target qobuz-proxy.service
-Wants=network-online.target
 
 [Service]
 Type=simple
-User=pi
-WorkingDirectory=/opt/qobuz-pi-control
-ExecStart=/opt/qobuz-pi-control/.venv/bin/qobuz-pi-control --config /opt/qobuz-pi-control/config.toml
+User=@USER@
+WorkingDirectory=@HOME@/src/qobuz-pi-control
+Environment=PYTHONUNBUFFERED=1
+# Ordering is not readiness. Wait until the proxy HTTP API responds.
+# If unavailable for 90 seconds, fail startup and let systemd retry.
+# Match URL/port to qobuz_proxy.base_url in config.toml.
+ExecStartPre=/usr/bin/timeout 90 /bin/sh -c 'until /usr/bin/curl -fsS --max-time 2 http://127.0.0.1:8689/api/speakers >/dev/null 2>&1; do sleep 2; done'
+TimeoutStartSec=110
+ExecStart=@HOME@/src/qobuz-pi-control/.venv/bin/qobuz-pi-control --config @HOME@/src/qobuz-pi-control/config.toml
 Restart=on-failure
-RestartSec=3
+RestartSec=5
+TimeoutStopSec=15
 
 [Install]
 WantedBy=multi-user.target
