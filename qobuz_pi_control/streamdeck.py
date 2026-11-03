@@ -64,7 +64,7 @@ async def _download_artwork(http: aiohttp.ClientSession, url: str):
             logger.warning("Artwork attempt %d failed: %s", attempt + 1, url, exc_info=True)
     return None
 
-async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None:
+async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status, ir_enabled: bool = False) -> None:
     try:
         from StreamDeck.DeviceManager import DeviceManager
     except ImportError as exc:
@@ -113,10 +113,14 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
                     ("artwork + all info", "artwork + title",
                      "spectrum + title", "spectrum only")[display_mode])
 
+    key_actions = dict(KEY_ACTIONS)
+    if ir_enabled:
+        key_actions.update({13: "volume_down", 14: "volume_up"})
+
     def on_key_change(_deck, key: int, state: bool) -> None:
         if state and key == 4:
             loop.call_soon_threadsafe(toggle_display)
-        elif state and (action := KEY_ACTIONS.get(key)):
+        elif state and (action := key_actions.get(key)):
             loop.call_soon_threadsafe(
                 lambda: asyncio.create_task(dispatch(action))
             )
@@ -350,3 +354,4 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
         await asyncio.gather(feedback_task, poll_task, receiver_task, return_exceptions=True)
         deck.reset()
         deck.close()
+

@@ -40,10 +40,18 @@ class StreamDeckConfig:
 
 
 @dataclass(slots=True)
+class IRConfig:
+    enabled: bool = False
+    device: str = "/dev/lirc0"
+    rc_device: str = "rc2"
+
+
+@dataclass(slots=True)
 class Config:
     proxy: ProxyConfig
     flirc: FlircConfig
     streamdeck: StreamDeckConfig
+    ir: IRConfig = field(default_factory=IRConfig)
 
 
 def load_config(path: str | Path) -> Config:
@@ -53,6 +61,7 @@ def load_config(path: str | Path) -> Config:
     proxy_raw = raw.get("qobuz_proxy", {})
     flirc_raw = raw.get("flirc", {})
     deck_raw = raw.get("streamdeck", {})
+    ir_raw = raw.get("ir", {})
 
     reserved = {"enabled", "device", "grab"}
     mappings = {
@@ -84,6 +93,7 @@ def load_config(path: str | Path) -> Config:
         raise ValueError("streamdeck.spectrum_bands must be 32 or 64")
 
     return Config(
+        ir=IRConfig(**ir_raw),
         proxy=ProxyConfig(
             base_url=proxy_raw.get("base_url", "http://127.0.0.1:8689"),
             speaker_id=proxy_raw.get("speaker_id", "cdq2"),
@@ -105,3 +115,4 @@ def load_config(path: str | Path) -> Config:
             spectrum_bands=spectrum_bands,
         ),
     )
+

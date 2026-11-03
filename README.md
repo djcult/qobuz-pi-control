@@ -130,3 +130,66 @@ PCM-monitor environment variable.
 
 The control process is intentionally stateless. QobuzProxy remains authoritative
 for playback state and the Qobuz queue.
+
+
+## IR Droid v3 / Audiolab 8300CDQ
+
+Optional IR support uses the kernel `ir_toy` driver and RC-5 decoder.
+It does not require lircd or changes to qobuz-proxy.
+
+Install `sudo apt install ir-keytable` (provides `ir-ctl` too). Add to your
+existing config.toml:
+
+```toml
+[ir]
+enabled = true
+device = "/dev/lirc0"
+rc_device = "rc2"
+```
+
+Check `ir-keytable` and `ls -l /dev/lirc*` for the current device names;
+rc numbers can change after reboot or adding receivers. Update the config
+if needed. Stop diagnostic `ir-keytable -t` processes before starting the controller.
+If replacing FLIRC, set `enabled = false` in your existing `[flirc]` section
+so the same remote press cannot arrive through both adapters.
+
+| Control | Action |
+|---|---|
+| Audiolab play/pause (`0x1635`) | Qobuz toggle |
+| Audiolab previous (`0x1621`) | Qobuz previous |
+| Audiolab next (`0x1620`) | Qobuz next |
+| Stream Deck key 13 (bottom row, fourth) | CDQ volume down (`0x1611`) |
+| Stream Deck key 14 (bottom right) | CDQ volume up (`0x1610`) |
+
+Volume keys send one step per press. They work across all display modes;
+the artwork/spectrum continues to fill those keys. Remote volume buttons
+continue to operate the CDQ directly. RC-5 toggle bits distinguish new presses
+from repeated frames; holding a transport button triggers one action. Receive
+actions are suppressed during transmission and for 300 ms afterwards.
+
+Run under your normal service user, without sudo. That user needs read/write
+access to the LIRC device and read access to the receiver's input event device.
+On Raspberry Pi OS these are usually covered by the `video` and `input` groups:
+
+```bash
+sudo usermod -aG video,input "$USER"
+```
+
+Check actual device ownership with `ls -l /dev/lirc0 /dev/input/event*`;
+log out/in for manual runs, or restart the service for new group membership.
+Enabling RC-5 also writes `/sys/class/rc/rc2/protocols`. If this is root-only,
+install a udev rule for this particular transceiver:
+
+```bash
+sudo tee /etc/udev/rules.d/70-irdroid.rules >/dev/null <<'RULE'
+ACTION=="add", SUBSYSTEM=="rc", ATTRS{idVendor}=="04d8", ATTRS{idProduct}=="f58b", RUN+="/bin/chgrp input /sys%p/protocols", RUN+="/bin/chmod g+w /sys%p/protocols"
+RULE
+sudo udevadm control --reload-rules
+```
+
+Unplug/replug the transceiver, recheck its device names, then restart your
+controller service. No sudo commands are launched by the controller.
+
+Hardware acceptance check: confirm one remote press toggles playback once,
+held next/previous does not skip multiple tracks, and each Stream Deck volume
+press changes the CDQ by one step without changing Qobuz playback.
