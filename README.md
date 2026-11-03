@@ -193,3 +193,31 @@ controller service. No sudo commands are launched by the controller.
 Hardware acceptance check: confirm one remote press toggles playback once,
 held next/previous does not skip multiple tracks, and each Stream Deck volume
 press changes the CDQ by one step without changing Qobuz playback.
+
+### Configurable button mappings
+
+Copy the optional `[streamdeck.buttons]`, `[ir.receive]` and `[ir.transmit]`
+tables from config.example.toml into your config.toml. Existing configs keep
+the default mappings. Each supplied table replaces that table's defaults;
+an empty buttons/receive table disables those bindings. Stream Deck keys
+are numbered 0–14 row by row; bottom-left is 10. Supported button actions:
+play, pause, toggle, previous, next, volume_down, volume_up, display.
+IR receive supports playback actions; transmit configures the two volume codes.
+Artwork control icons follow the configured positions in full-info mode.
+Keys 13/14 also display quality/time, so avoid them for icons in that mode.
+
+### Permanent IR permissions
+
+Install the supplied rule instead of the temporary chown/chmod workaround:
+
+```bash
+sudo install -m 0644 systemd/70-irdroid.rules /etc/udev/rules.d/70-irdroid.rules
+sudo usermod -aG input "$USER"
+sudo udevadm control --reload-rules
+```
+
+Stop the controller, unplug/replug the IR Droid, then log out/in (or reboot)
+to apply group membership. Restart the controller service if running under
+systemd. Ensure its User is the account added to input. Recheck device names
+in config after reconnecting. These rules cover LIRC transmit, input-event
+receive and the sysfs protocols file, and are reapplied on boot/reconnect.
