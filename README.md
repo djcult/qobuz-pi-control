@@ -158,11 +158,11 @@ so the same remote press cannot arrive through both adapters.
 | Audiolab play/pause (`0x1635`) | Qobuz toggle |
 | Audiolab previous (`0x1621`) | Qobuz previous |
 | Audiolab next (`0x1620`) | Qobuz next |
-| Stream Deck key 13 (bottom row, fourth) | CDQ volume down (`0x1611`) |
-| Stream Deck key 14 (bottom right) | CDQ volume up (`0x1610`) |
+| Stream Deck key 10 (bottom left) | CDQ volume down (`0x1611`) |
+| Stream Deck key 11 (bottom row, second) | CDQ volume up (`0x1610`) |
 
 Volume keys send one step per press. They work across all display modes;
-the artwork/spectrum continues to fill those keys. Remote volume buttons
+white speaker minus/plus icons on translucent circles match the transport icons in the artwork + all info mode. Other modes retain their clean artwork/spectrum. Remote volume buttons
 continue to operate the CDQ directly. RC-5 toggle bits distinguish new presses
 from repeated frames; holding a transport button triggers one action. Receive
 actions are suppressed during transmission and for 300 ms afterwards.
