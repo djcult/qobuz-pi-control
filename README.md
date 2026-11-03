@@ -262,6 +262,11 @@ spectrum + title, and spectrum only. Controls remain active in all modes.
 Full-info artwork displays control icons; the other modes hide those overlays.
 The artwork and metadata are fetched from the proxy's playback status.
 
+Set `spectrum_bands` to any integer from 1 to 256, for example 24, 48, 80 or 96.
+Fewer bands give wider bars; more bands give finer visual subdivisions and
+increase FFT processing work. High counts can share FFT bins and crowd the
+display, so they do not necessarily reveal more frequency detail.
+
 Spectrum additionally requires the proxy's PCM monitor feed at
 /tmp/qobuz-pcm.sock. See the proxy installation instructions linked above.
 Both services must run as the same user and share /tmp. An absent feed leaves
