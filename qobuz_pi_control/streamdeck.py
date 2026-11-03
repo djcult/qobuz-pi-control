@@ -115,7 +115,7 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status, ir_enab
 
     key_actions = dict(KEY_ACTIONS)
     if ir_enabled:
-        key_actions.update({13: "volume_down", 14: "volume_up"})
+        key_actions.update({10: "volume_down", 11: "volume_up"})
 
     def on_key_change(_deck, key: int, state: bool) -> None:
         if state and key == 4:
@@ -310,7 +310,7 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status, ir_enab
                     state = (last_art_url, playing, display_metadata, remaining, quality, display_revision, title_offset)
                     if state != last_render_state:
                         tiles = _artwork_tiles(deck, artwork_bytes, playing, display_metadata,
-                                               remaining, None, quality, show_overlays, title_offset, len(metadata[2].split()))
+                                               remaining, None, quality, show_overlays, title_offset, len(metadata[2].split()), volume_controls=ir_enabled)
                         await asyncio.to_thread(display.show_native, tiles)
                         last_render_state = state
                 else:
