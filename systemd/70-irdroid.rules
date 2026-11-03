@@ -1,0 +1,4 @@
+# IR Droid v3: LIRC TX, input RX, and protocol configuration.
+SUBSYSTEM=="lirc", ATTRS{idVendor}=="04d8", ATTRS{idProduct}=="f58b", GROUP="input", MODE="0660"
+SUBSYSTEM=="input", KERNEL=="event*", ATTRS{idVendor}=="04d8", ATTRS{idProduct}=="f58b", GROUP="input", MODE="0660"
+ACTION=="add", SUBSYSTEM=="rc", ATTRS{idVendor}=="04d8", ATTRS{idProduct}=="f58b", RUN+="/bin/chgrp input /sys%p/protocols", RUN+="/bin/chmod g+w /sys%p/protocols"
