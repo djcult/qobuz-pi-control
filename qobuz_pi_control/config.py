@@ -91,9 +91,9 @@ def load_config(path: str | Path) -> Config:
     if not 0.1 <= spectrum_gain <= 4.0:
         raise ValueError("streamdeck.spectrum_gain must be between 0.1 and 4.0")
 
-    spectrum_bands = int(deck_raw.get("spectrum_bands", 64))
-    if spectrum_bands not in (32, 64):
-        raise ValueError("streamdeck.spectrum_bands must be 32 or 64")
+    spectrum_bands = deck_raw.get("spectrum_bands", 64)
+    if type(spectrum_bands) is not int or not 1 <= spectrum_bands <= 256:
+        raise ValueError("streamdeck.spectrum_bands must be an integer between 1 and 256")
 
     actions = {"play", "pause", "toggle", "next", "previous", "volume_down", "volume_up"}
     buttons = {int(k): v for k, v in deck_raw.get("buttons", StreamDeckConfig().buttons).items()}
