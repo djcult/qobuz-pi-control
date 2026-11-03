@@ -262,6 +262,12 @@ spectrum + title, and spectrum only. Controls remain active in all modes.
 Full-info artwork displays control icons; the other modes hide those overlays.
 The artwork and metadata are fetched from the proxy's playback status.
 
+Set `spectrum_palette` in your existing `[streamdeck]` section to
+`"classic"` (default rainbow), `"retro_orange"` (amber bars, pale yellow peaks)
+or `"retro_green"` (phosphor green bars, mint peaks). Retro schemes use a
+subtly tinted near-black background and one bar colour across frequencies.
+Both spectrum display modes use the selected palette. Restart after changing it.
+
 Set `spectrum_bands` to any integer from 1 to 256, for example 24, 48, 80 or 96.
 Fewer bands give wider bars; more bands give finer visual subdivisions and
 increase FFT processing work. High counts can share FFT bins and crowd the
