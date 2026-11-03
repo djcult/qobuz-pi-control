@@ -53,6 +53,10 @@ def test_spectrum_delay_defaults_and_validation(tmp_path: Path):
 def test_spectrum_band_validation(tmp_path: Path):
     import pytest
     path = tmp_path / "config.toml"
-    path.write_text("[streamdeck]\nspectrum_bands = 48\n")
-    with pytest.raises(ValueError, match="spectrum_bands"):
-        load_config(path)
+    for bands in (1, 16, 32, 48, 64, 80, 96, 128, 256):
+        path.write_text(f"[streamdeck]\nspectrum_bands = {bands}\n")
+        assert load_config(path).streamdeck.spectrum_bands == bands
+    for value in ("0", "-1", "257", "48.5", "true", '"48"'):
+        path.write_text(f"[streamdeck]\nspectrum_bands = {value}\n")
+        with pytest.raises(ValueError, match="spectrum_bands"):
+            load_config(path)
