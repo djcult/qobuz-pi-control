@@ -45,7 +45,7 @@ def _transport_image(deck, playing: bool):
 
 
 def _artwork_tiles(deck, artwork: bytes, playing: bool = False,
-                   metadata=("", "", ""), remaining=None, progress=None, quality="", show_overlays=True, title_offset=0, track_word_count=0):
+                   metadata=("", "", ""), remaining=None, progress=None, quality="", show_overlays=True, title_offset=0, track_word_count=0, volume_controls=False):
     """Compose one continuous 5x3 canvas, then omit the physical button gaps."""
     from PIL import Image, ImageOps, ImageDraw, ImageFont
     from StreamDeck.ImageHelpers import PILHelper
@@ -125,9 +125,9 @@ def _artwork_tiles(deck, artwork: bytes, playing: bool = False,
         from PIL import Image as PILImage
         scale = 4
         icon_size = 48
-        for index in KEY_ACTIONS:
-            cx = index * (key_w + ART_GAP_PX) + key_w // 2
-            cy = key_h // 2
+        for index in (*KEY_ACTIONS, *((10, 11) if volume_controls else ())):
+            cx = (index % 5) * (key_w + ART_GAP_PX) + key_w // 2
+            cy = (index // 5) * (key_h + ART_GAP_PX) + key_h // 2
             glyph = PILImage.new("RGBA", (icon_size * scale, icon_size * scale))
             gd = ImageDraw.Draw(glyph)
             def rect(x0, y0, x1, y1, radius=0):
@@ -139,7 +139,13 @@ def _artwork_tiles(deck, artwork: bytes, playing: bool = False,
             def triangle(points):
                 gd.polygon([(round(x * scale), round(y * scale)) for x, y in points],
                            fill="white")
-            if index == 0:  # Previous: point LEFT, with a stop bar.
+            if index in (10, 11):
+                rect(9, 20, 15, 28, radius=1)
+                triangle([(14, 20), (23, 13), (23, 35)])
+                rect(29, 23, 40, 25, radius=1)
+                if index == 11:
+                    rect(34, 18, 36, 30, radius=1)
+            elif index == 0:  # Previous: point LEFT, with a stop bar.
                 rect(12, 13, 15, 35, radius=1)
                 triangle([(34, 12), (34, 36), (16, 24)])
             elif index == 2:  # Next: point RIGHT, with a stop bar.
