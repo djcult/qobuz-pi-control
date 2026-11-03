@@ -42,7 +42,7 @@ class Infrared:
             try:
                 process = await asyncio.create_subprocess_exec(
                     "ir-ctl", "-d", self.config.device,
-                    f"--scancode=rc5:0x{TX_CODES[action]:04x}",
+                    f"--scancode=rc5:0x{self.config.transmit[action]:04x}",
                     stderr=asyncio.subprocess.PIPE,
                 )
                 _, error = await asyncio.wait_for(process.communicate(), 3)
@@ -80,11 +80,11 @@ class Infrared:
                 code = int(match[1], 16)
                 now = time.monotonic()
                 fresh = presses.accept(code, "toggle=1" in match[2], now)
-                if fresh and now >= self.ignore_until and code in RX_ACTIONS:
+                if fresh and now >= self.ignore_until and code in self.config.receive:
                     # Keep consuming repeats while the HTTP request is running.
                     # A bounded queue avoids accumulating actions during outages.
                     if not queue.full():
-                        queue.put_nowait(RX_ACTIONS[code])
+                        queue.put_nowait(self.config.receive[code])
             raise RuntimeError(f"IR receiver exited: {await process.wait()}")
         finally:
             worker.cancel()
