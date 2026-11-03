@@ -20,4 +20,30 @@ brightness = 35
 spectrum_fps = 15  # Try 20, 25, or 30 for benchmarking
 spectrum_delay_ms = 150  # Additional visual delay; tune to match DAC audio (0–2000 ms)
 spectrum_gain = 1.4  # Visual bar height multiplier (0.1–4.0); 1.0 = original
-spectrum_bands = 64  # Use 32 for wider bars, or 64 for finer detail
+spectrum_palette = "classic"  # classic, retro_orange, retro_green
+spectrum_bands = 64  # Any integer 1–256; fewer bands give wider bars
+
+
+[ir]
+enabled = false
+# Enable for IR Droid v3. Verify these names after reconnecting/rebooting.
+device = "/dev/lirc0"
+rc_device = "rc2"
+
+# Tables replace their defaults completely. Keys are zero-based, row by row.
+[streamdeck.buttons]
+"0" = "previous"
+"1" = "toggle"
+"2" = "next"
+"4" = "display"
+"10" = "volume_down"
+"11" = "volume_up"
+
+[ir.receive]
+"0x1635" = "toggle"
+"0x1621" = "previous"
+"0x1620" = "next"
+
+[ir.transmit]
+volume_down = 0x1611
+volume_up = 0x1610

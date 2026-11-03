@@ -36,7 +36,18 @@ class StreamDeckConfig:
     spectrum_fps: float = 15.0
     spectrum_delay_ms: float = 150.0
     spectrum_gain: float = 1.4
+    spectrum_palette: str = "classic"
     spectrum_bands: int = 64
+    buttons: dict[int, str] = field(default_factory=lambda: {0: "previous", 1: "toggle", 2: "next", 4: "display", 10: "volume_down", 11: "volume_up"})
+
+
+@dataclass(slots=True)
+class IRConfig:
+    enabled: bool = False
+    device: str = "/dev/lirc0"
+    rc_device: str = "rc2"
+    receive: dict[int, str] = field(default_factory=lambda: {0x1635: "toggle", 0x1621: "previous", 0x1620: "next"})
+    transmit: dict[str, int] = field(default_factory=lambda: {"volume_down": 0x1611, "volume_up": 0x1610})
 
 
 @dataclass(slots=True)
@@ -44,6 +55,7 @@ class Config:
     proxy: ProxyConfig
     flirc: FlircConfig
     streamdeck: StreamDeckConfig
+    ir: IRConfig = field(default_factory=IRConfig)
 
 
 def load_config(path: str | Path) -> Config:
@@ -53,6 +65,7 @@ def load_config(path: str | Path) -> Config:
     proxy_raw = raw.get("qobuz_proxy", {})
     flirc_raw = raw.get("flirc", {})
     deck_raw = raw.get("streamdeck", {})
+    ir_raw = raw.get("ir", {})
 
     reserved = {"enabled", "device", "grab"}
     mappings = {
@@ -79,11 +92,29 @@ def load_config(path: str | Path) -> Config:
     if not 0.1 <= spectrum_gain <= 4.0:
         raise ValueError("streamdeck.spectrum_gain must be between 0.1 and 4.0")
 
-    spectrum_bands = int(deck_raw.get("spectrum_bands", 64))
-    if spectrum_bands not in (32, 64):
-        raise ValueError("streamdeck.spectrum_bands must be 32 or 64")
+    spectrum_bands = deck_raw.get("spectrum_bands", 64)
+    if type(spectrum_bands) is not int or not 1 <= spectrum_bands <= 256:
+        raise ValueError("streamdeck.spectrum_bands must be an integer between 1 and 256")
+
+    spectrum_palette = deck_raw.get("spectrum_palette", "classic")
+    if spectrum_palette not in ("classic", "retro_orange", "retro_green"):
+        raise ValueError("streamdeck.spectrum_palette must be classic, retro_orange or retro_green")
+
+    actions = {"play", "pause", "toggle", "next", "previous", "volume_down", "volume_up"}
+    buttons = {int(k): v for k, v in deck_raw.get("buttons", StreamDeckConfig().buttons).items()}
+    if any(not 0 <= k < 15 or v not in actions | {"display"} for k, v in buttons.items()):
+        raise ValueError("streamdeck.buttons requires keys 0–14 and supported actions")
+    receive = {int(k, 0) if isinstance(k, str) else k: v
+               for k, v in ir_raw.get("receive", IRConfig().receive).items()}
+    transmit = dict(ir_raw.get("transmit", IRConfig().transmit))
+    if any(not 0 <= k <= 0x1f7f or v not in actions - {"volume_down", "volume_up"} for k, v in receive.items()):
+        raise ValueError("ir.receive requires RC-5 codes and playback actions")
+    if set(transmit) != {"volume_down", "volume_up"} or any(type(v) is not int or not 0 <= v <= 0x1f7f for v in transmit.values()):
+        raise ValueError("ir.transmit requires volume_down and volume_up RC-5 codes")
+    ir_raw = {**ir_raw, "receive": receive, "transmit": transmit}
 
     return Config(
+        ir=IRConfig(**ir_raw),
         proxy=ProxyConfig(
             base_url=proxy_raw.get("base_url", "http://127.0.0.1:8689"),
             speaker_id=proxy_raw.get("speaker_id", "cdq2"),
@@ -103,5 +134,8 @@ def load_config(path: str | Path) -> Config:
             spectrum_delay_ms=spectrum_delay_ms,
             spectrum_gain=spectrum_gain,
             spectrum_bands=spectrum_bands,
+            spectrum_palette=spectrum_palette,
+            buttons=buttons,
         ),
     )
+

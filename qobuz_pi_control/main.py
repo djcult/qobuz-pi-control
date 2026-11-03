@@ -9,6 +9,7 @@ import logging
 from .client import QobuzProxyClient
 from .config import load_config
 from .flirc import run_flirc
+from .infrared import Infrared
 from .streamdeck import run_streamdeck
 
 logger = logging.getLogger(__name__)
@@ -23,8 +24,13 @@ async def run(config_path: str, no_flirc: bool = False, no_streamdeck: bool = Fa
         config.proxy.timeout_seconds,
     ) as client:
 
+        infrared = Infrared(config.ir)
+
         async def dispatch(action: str) -> None:
             try:
+                if action in {"volume_down", "volume_up"}:
+                    await infrared.send(action)
+                    return
                 result = await client.action(action)
                 logger.info(
                     "%s: %s (%s)",
@@ -36,10 +42,12 @@ async def run(config_path: str, no_flirc: bool = False, no_streamdeck: bool = Fa
                 logger.exception("Control action failed: %s", action)
 
         tasks = []
+        if config.ir.enabled:
+            tasks.append(asyncio.create_task(infrared.receive(dispatch)))
         if config.flirc.enabled and not no_flirc:
             tasks.append(asyncio.create_task(run_flirc(config.flirc, dispatch)))
         if config.streamdeck.enabled and not no_streamdeck:
-            tasks.append(asyncio.create_task(run_streamdeck(config.streamdeck, dispatch, client.status)))
+            tasks.append(asyncio.create_task(run_streamdeck(config.streamdeck, dispatch, client.status, config.ir.enabled)))
 
         if not tasks:
             raise RuntimeError("No control adapters enabled")
@@ -69,3 +77,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

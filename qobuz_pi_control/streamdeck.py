@@ -64,7 +64,7 @@ async def _download_artwork(http: aiohttp.ClientSession, url: str):
             logger.warning("Artwork attempt %d failed: %s", attempt + 1, url, exc_info=True)
     return None
 
-async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None:
+async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status, ir_enabled: bool = False) -> None:
     try:
         from StreamDeck.DeviceManager import DeviceManager
     except ImportError as exc:
@@ -113,10 +113,13 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
                     ("artwork + all info", "artwork + title",
                      "spectrum + title", "spectrum only")[display_mode])
 
+    key_actions = {key: action for key, action in config.buttons.items()
+                   if ir_enabled or action not in {"volume_down", "volume_up"}}
+
     def on_key_change(_deck, key: int, state: bool) -> None:
-        if state and key == 4:
+        if state and key_actions.get(key) == "display":
             loop.call_soon_threadsafe(toggle_display)
-        elif state and (action := KEY_ACTIONS.get(key)):
+        elif state and (action := key_actions.get(key)):
             loop.call_soon_threadsafe(
                 lambda: asyncio.create_task(dispatch(action))
             )
@@ -257,7 +260,7 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
                     targets = ([min(1.0, value * config.spectrum_gain) for value in levels]
                                if levels is not None else [0.0] * len(spectrum.levels))
                     spectrum.update(targets)
-                    canvas = render_canvas(spectrum, deck.key_image_format()["size"])
+                    canvas = render_canvas(spectrum, deck.key_image_format()["size"], palette=config.spectrum_palette)
                     if display_mode == 2:
                         # Put the five-key marquee on the top row in spectrum mode.
                         # Artwork layouts retain their middle-row marquee.
@@ -298,6 +301,30 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
                                      else (255, 255, 255, 255))
                             draw.text((x + kw // 2, band_y + kh // 2),
                                       fitted, font=font, anchor="mm", fill=color)
+                        # Volume controls on page 3 follow the configured key positions.
+                        for key, action in key_actions.items():
+                            if action not in {"volume_down", "volume_up"}:
+                                continue
+                            cx = (key % 5) * (kw + gap) + kw // 2
+                            cy = (key // 5) * (kh + gap) + kh // 2
+                            draw.ellipse((cx - 25, cy - 25, cx + 25, cy + 25),
+                                         fill=(0, 0, 0, 115))
+                            scale = 4
+                            glyph = Image.new("RGBA", (48 * scale, 48 * scale))
+                            gd = ImageDraw.Draw(glyph)
+                            def rect(x0, y0, x1, y1):
+                                gd.rounded_rectangle(
+                                    tuple(v * scale for v in (x0, y0, x1, y1)),
+                                    radius=scale, fill="white")
+                            rect(9, 20, 15, 28)
+                            gd.polygon([(14 * scale, 20 * scale),
+                                        (23 * scale, 13 * scale),
+                                        (23 * scale, 35 * scale)], fill="white")
+                            rect(29, 23, 40, 25)
+                            if action == "volume_up":
+                                rect(34, 18, 36, 30)
+                            glyph = glyph.resize((48, 48), Image.Resampling.LANCZOS)
+                            overlay.alpha_composite(glyph, (cx - 24, cy - 24))
                         canvas = Image.alpha_composite(canvas.convert("RGBA"), overlay).convert("RGB")
                     await asyncio.to_thread(display.show, slice_tiles(canvas, deck.key_image_format()["size"]))
                     last_render_state = None
@@ -306,7 +333,7 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
                     state = (last_art_url, playing, display_metadata, remaining, quality, display_revision, title_offset)
                     if state != last_render_state:
                         tiles = _artwork_tiles(deck, artwork_bytes, playing, display_metadata,
-                                               remaining, None, quality, show_overlays, title_offset, len(metadata[2].split()))
+                                               remaining, None, quality, show_overlays, title_offset, len(metadata[2].split()), control_actions=key_actions)
                         await asyncio.to_thread(display.show_native, tiles)
                         last_render_state = state
                 else:
@@ -350,3 +377,4 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status) -> None
         await asyncio.gather(feedback_task, poll_task, receiver_task, return_exceptions=True)
         deck.reset()
         deck.close()
+

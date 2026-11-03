@@ -75,11 +75,19 @@ def band_color(position: float) -> tuple[int, int, int]:
 
 
 def render_canvas(spectrum: Spectrum, key_size: tuple[int, int] = (72, 72),
-                  gap: int = GAP) -> Image.Image:
+                  gap: int = GAP, palette: str = "classic") -> Image.Image:
     """Render one logical canvas; tile gaps are excluded when sliced."""
     kw, kh = key_size
     width, height = canvas_size(key_size, gap)
-    image = Image.new("RGB", (width, height), (3, 3, 5))
+    themes = {
+        "classic": ((3, 3, 5), None, None),
+        "retro_orange": ((9, 4, 1), (235, 132, 28), (255, 222, 139)),
+        "retro_green": ((1, 7, 3), (65, 210, 108), (181, 255, 205)),
+    }
+    if palette not in themes:
+        raise ValueError(f"Unknown spectrum palette: {palette}")
+    background, bar_color, marker_color = themes[palette]
+    image = Image.new("RGB", (width, height), background)
     draw = ImageDraw.Draw(image)
     margin = 9
     usable_height = height - 2 * margin
@@ -87,16 +95,32 @@ def render_canvas(spectrum: Spectrum, key_size: tuple[int, int] = (72, 72),
     bar_width = max(2, int(spacing * 0.62))
     for i, (level, peak) in enumerate(zip(spectrum.levels, spectrum.peaks)):
         x = round(margin + (i + 0.5) * spacing)
-        color = band_color(i / max(1, len(spectrum.levels) - 1))
-        peak_color = tuple(round(channel + (255 - channel) * 0.48) for channel in color)
-        top = height - margin - round(level * usable_height)
+        color = bar_color or band_color(i / max(1, len(spectrum.levels) - 1))
+        peak_color = marker_color or tuple(round(channel + (255 - channel) * 0.48) for channel in color)
         bottom = height - margin
-        if bottom > top:
-            draw.rectangle((x - bar_width // 2, top, x + bar_width // 2, bottom),
-                           fill=color)
-        peak_y = height - margin - round(peak * usable_height)
-        draw.line((x - bar_width // 2, peak_y, x + bar_width // 2, peak_y),
-                  fill=peak_color, width=2)
+        if palette != "classic":
+            # Quantise the visual fill to a shared LED-style grid.
+            block_height, block_gap = 6, 3
+            pitch = block_height + block_gap
+            rows = max(1, usable_height // pitch)
+            lit = min(rows, max(0, int(level * rows)))
+            def block(row, fill):
+                y = bottom - row * pitch
+                draw.rectangle((x - bar_width // 2, y - block_height + 1,
+                                x + bar_width // 2, y), fill=fill)
+            for row in range(lit):
+                block(row, color)
+            if peak > 0:
+                peak_row = min(rows - 1, max(0, math.ceil(peak * rows) - 1))
+                block(peak_row, peak_color)
+        else:
+            top = bottom - round(level * usable_height)
+            if bottom > top:
+                draw.rectangle((x - bar_width // 2, top, x + bar_width // 2, bottom),
+                               fill=color)
+            peak_y = bottom - round(peak * usable_height)
+            draw.line((x - bar_width // 2, peak_y, x + bar_width // 2, peak_y),
+                      fill=peak_color, width=2)
     return image
 
 
