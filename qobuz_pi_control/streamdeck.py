@@ -260,7 +260,7 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status, ir_enab
                     targets = ([min(1.0, value * config.spectrum_gain) for value in levels]
                                if levels is not None else [0.0] * len(spectrum.levels))
                     spectrum.update(targets)
-                    canvas = render_canvas(spectrum, deck.key_image_format()["size"])
+                    canvas = render_canvas(spectrum, deck.key_image_format()["size"], palette=config.spectrum_palette)
                     if display_mode == 2:
                         # Put the five-key marquee on the top row in spectrum mode.
                         # Artwork layouts retain their middle-row marquee.
