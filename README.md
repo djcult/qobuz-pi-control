@@ -132,6 +132,162 @@ The control process is intentionally stateless. QobuzProxy remains authoritative
 for playback state and the Qobuz queue.
 
 
+## FLIRC receiver setup
+
+FLIRC is an optional USB IR receiver that presents as a keyboard. It receives
+remote presses; it cannot transmit volume commands to the amplifier.
+Use FLIRC or IR Droid for a given remote's playback buttons to avoid duplicate
+actions. Disable an unused adapter in config.toml.
+
+### Pair the remote and choose keyboard keys
+
+1. Install the manufacturer's [FLIRC software](https://flirc.tv/) on a computer
+   and plug the FLIRC receiver into that computer.
+2. In the FLIRC keyboard controller, select a keyboard key and press the
+   remote button you want to associate with it. Repeat for each action.
+   For a simple GUI setup, use F1–F5 and the matching configuration below.
+3. Move the programmed receiver to the Pi. The associations are stored in
+   the receiver; the FLIRC application does not need to run on the Pi.
+
+Edit your existing config.toml section:
+
+```toml
+[flirc]
+enabled = true
+device = "auto"
+grab = false
+play_pause = "KEY_F1"
+next = "KEY_F2"
+previous = "KEY_F3"
+play = "KEY_F4"
+pause = "KEY_F5"
+```
+
+These must match the keys you taught FLIRC. The shipped example instead uses
+F13–F17 to avoid collisions with ordinary keyboard shortcuts; retain those
+if your receiver is already programmed that way. Unused play/pause actions
+need not be learned. Choose keys that other applications will not act on,
+or enable grab for exclusive access to this receiver.
+
+### Permissions and testing
+
+```bash
+sudo usermod -aG input pi
+```
+
+Log out/in or reboot, then stop any running controller service before testing.
+FLIRC input event devices must be readable by pi. Check with:
+
+```bash
+ls -l /dev/input/by-id/
+ls -l /dev/input/event*
+```
+
+Auto-discovery selects an input device whose name contains flirc. If necessary,
+set device to its keyboard event path, preferably the stable
+/dev/input/by-id/...-event-kbd symlink shown on your Pi. Do not use an invented
+path. For FLIRC-only testing, set enabled = false in the existing [ir] section:
+
+```bash
+.venv/bin/qobuz-pi-control --config config.toml --no-streamdeck
+```
+
+Press the learned buttons and watch the accepted/rejected action logs. If
+nothing happens, optionally install evtest with sudo apt install evtest,
+run sudo evtest, choose the FLIRC keyboard and verify the emitted KEY_F*
+names match the config. Stop evtest before retrying. If auto-discovery fails,
+check the receiver is connected and the user can read its input device.
+
+## Stream Deck setup
+
+The tested hardware is an Elgato Stream Deck MK.2 with 15 buttons, arranged
+in five columns and three rows. Connect it directly to the Pi by USB.
+The controller currently opens the first Stream Deck it finds; the device
+config field does not select a particular deck. The visual layout assumes
+a 5-by-3 deck.
+
+### Install and grant USB access
+
+From the repository folder:
+
+```bash
+sudo apt install libhidapi-libusb0
+uv sync --no-dev --extra streamdeck
+sudo groupadd -f streamdeck
+sudo usermod -aG streamdeck pi
+sudo tee /etc/udev/rules.d/70-streamdeck.rules >/dev/null <<'RULE'
+SUBSYSTEM=="usb", ATTR{idVendor}=="0fd9", GROUP="streamdeck", MODE="0660"
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0fd9", GROUP="streamdeck", MODE="0660"
+RULE
+sudo udevadm control --reload-rules
+```
+
+These rules cover Elgato USB devices (vendor 0fd9). Log out/in and
+unplug/reconnect the Stream Deck, or reboot. This gives the service user
+access without running the controller as root.
+
+### Configuration and buttons
+
+Edit the existing [streamdeck] section, preserving your preferred spectrum
+settings:
+
+```toml
+[streamdeck]
+enabled = true
+device = "auto"
+brightness = 35
+spectrum_fps = 15
+spectrum_delay_ms = 150
+spectrum_gain = 1.4
+spectrum_bands = 64
+
+[streamdeck.buttons]
+"0" = "previous"
+"1" = "toggle"
+"2" = "next"
+"4" = "display"
+"10" = "volume_down"
+"11" = "volume_up"
+```
+
+| Row | Button indices, left to right | Default controls |
+|---|---|---|
+| Top | 0, 1, 2, 3, 4 | Previous, play/pause, next, unused, display mode |
+| Middle | 5, 6, 7, 8, 9 | No default actions |
+| Bottom | 10, 11, 12, 13, 14 | Volume down, volume up, unused, unused, unused |
+
+Volume requires the enabled IR Droid adapter described below.
+The display button cycles artwork + all info, artwork + title,
+spectrum + title, and spectrum only. Controls remain active in all modes.
+Full-info artwork displays control icons; the other modes hide those overlays.
+The artwork and metadata are fetched from the proxy's playback status.
+
+Spectrum additionally requires the proxy's PCM monitor feed at
+/tmp/qobuz-pcm.sock. See the proxy installation instructions linked above.
+Both services must run as the same user and share /tmp. An absent feed leaves
+the spectrum silent; it does not disable the playback buttons.
+
+### Interactive test and troubleshooting
+
+Stop the installed service first (use its actual unit name if different):
+
+```bash
+sudo systemctl stop qobuz-pi-control
+.venv/bin/qobuz-pi-control --config config.toml --no-flirc
+```
+
+Set [ir].enabled = false for a Stream Deck-only test, or leave it enabled to
+test volume as well. Press Ctrl+C to stop before restarting the service.
+
+- If the StreamDeck Python package is missing, rerun uv sync with
+  --extra streamdeck.
+- If no deck is found or USB access is denied, check lsusb, the udev rules
+  and pi's group membership.
+- If reset fails with a feature-report error, stop all competing controller
+  instances and unplug/reconnect the Elgato Stream Deck before retrying.
+- An IR protocols permission error concerns the IR Droid, not the Stream Deck;
+  follow the separate permissions instructions below.
+
 ## IR Droid v3 / Audiolab 8300CDQ
 
 The IR Droid USB transceiver v3 receives Audiolab remote commands and sends
