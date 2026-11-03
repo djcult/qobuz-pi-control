@@ -28,3 +28,21 @@ enabled = false
 # Enable for IR Droid v3. Verify these names after reconnecting/rebooting.
 device = "/dev/lirc0"
 rc_device = "rc2"
+
+# Tables replace their defaults completely. Keys are zero-based, row by row.
+[streamdeck.buttons]
+"0" = "previous"
+"1" = "toggle"
+"2" = "next"
+"4" = "display"
+"10" = "volume_down"
+"11" = "volume_up"
+
+[ir.receive]
+"0x1635" = "toggle"
+"0x1621" = "previous"
+"0x1620" = "next"
+
+[ir.transmit]
+volume_down = 0x1611
+volume_up = 0x1610
