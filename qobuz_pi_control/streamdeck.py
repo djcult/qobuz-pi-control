@@ -301,6 +301,30 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status, ir_enab
                                      else (255, 255, 255, 255))
                             draw.text((x + kw // 2, band_y + kh // 2),
                                       fitted, font=font, anchor="mm", fill=color)
+                        # Volume controls on page 3 follow the configured key positions.
+                        for key, action in key_actions.items():
+                            if action not in {"volume_down", "volume_up"}:
+                                continue
+                            cx = (key % 5) * (kw + gap) + kw // 2
+                            cy = (key // 5) * (kh + gap) + kh // 2
+                            draw.ellipse((cx - 25, cy - 25, cx + 25, cy + 25),
+                                         fill=(0, 0, 0, 115))
+                            scale = 4
+                            glyph = Image.new("RGBA", (48 * scale, 48 * scale))
+                            gd = ImageDraw.Draw(glyph)
+                            def rect(x0, y0, x1, y1):
+                                gd.rounded_rectangle(
+                                    tuple(v * scale for v in (x0, y0, x1, y1)),
+                                    radius=scale, fill="white")
+                            rect(9, 20, 15, 28)
+                            gd.polygon([(14 * scale, 20 * scale),
+                                        (23 * scale, 13 * scale),
+                                        (23 * scale, 35 * scale)], fill="white")
+                            rect(29, 23, 40, 25)
+                            if action == "volume_up":
+                                rect(34, 18, 36, 30)
+                            glyph = glyph.resize((48, 48), Image.Resampling.LANCZOS)
+                            overlay.alpha_composite(glyph, (cx - 24, cy - 24))
                         canvas = Image.alpha_composite(canvas.convert("RGBA"), overlay).convert("RGB")
                     await asyncio.to_thread(display.show, slice_tiles(canvas, deck.key_image_format()["size"]))
                     last_render_state = None
