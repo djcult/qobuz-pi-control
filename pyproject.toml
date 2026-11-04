@@ -20,6 +20,7 @@ streamdeck = [
 ]
 dev = [
   "numpy>=1.24",
+  "pillow>=10",
   "pytest>=8",
   "pytest-asyncio>=0.23",
 ]

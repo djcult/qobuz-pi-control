@@ -38,7 +38,7 @@ class StreamDeckConfig:
     spectrum_gain: float = 1.4
     spectrum_palette: str = "classic"
     spectrum_bands: int = 64
-    buttons: dict[int, str] = field(default_factory=lambda: {0: "previous", 1: "toggle", 2: "next", 4: "display", 10: "volume_down", 11: "volume_up"})
+    buttons: dict[int, str] = field(default_factory=lambda: {0: "previous", 1: "toggle", 2: "next", 4: "display", 10: "volume_down", 11: "volume_up", 13: "light_down", 14: "light_up"})
 
 
 @dataclass(slots=True)
@@ -102,7 +102,7 @@ def load_config(path: str | Path) -> Config:
 
     actions = {"play", "pause", "toggle", "next", "previous", "volume_down", "volume_up"}
     buttons = {int(k): v for k, v in deck_raw.get("buttons", StreamDeckConfig().buttons).items()}
-    if any(not 0 <= k < 15 or v not in actions | {"display"} for k, v in buttons.items()):
+    if any(not 0 <= k < 15 or v not in actions | {"display", "light_down", "light_up"} for k, v in buttons.items()):
         raise ValueError("streamdeck.buttons requires keys 0–14 and supported actions")
     receive = {int(k, 0) if isinstance(k, str) else k: v
                for k, v in ir_raw.get("receive", IRConfig().receive).items()}

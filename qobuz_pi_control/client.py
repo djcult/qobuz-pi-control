@@ -70,3 +70,14 @@ class QobuzProxyClient:
             (speaker for speaker in speakers if speaker.get("id") == self.speaker_id),
             {},
         )
+
+    async def play_album(self, album_id: str) -> None:
+        from urllib.parse import quote
+
+        if self._session is None:
+            raise RuntimeError("Client must be used as an async context manager")
+        url = f"{self.base_url}/api/speakers/{quote(self.speaker_id, safe='')}/albums/{quote(album_id, safe='')}/play"
+        async with self._session.post(url, timeout=aiohttp.ClientTimeout(total=30)) as response:
+            data = await response.json()
+            if response.status != 200 or not data.get("accepted"):
+                raise RuntimeError(data.get("error", f"Album launch failed: HTTP {response.status}"))

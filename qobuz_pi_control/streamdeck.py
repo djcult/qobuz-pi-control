@@ -11,7 +11,7 @@ import re
 import aiohttp
 
 from .config import StreamDeckConfig
-from .artwork import _label_image, _artwork_tiles, _transport_image
+from .artwork import _label_image, _artwork_tiles, _transport_image, _page_indicator
 from .spectrum import Spectrum, render_canvas
 from .pcm_receiver import receive_spectrum
 from .display import TileDisplay, slice_tiles
@@ -64,7 +64,7 @@ async def _download_artwork(http: aiohttp.ClientSession, url: str):
             logger.warning("Artwork attempt %d failed: %s", attempt + 1, url, exc_info=True)
     return None
 
-async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status, ir_enabled: bool = False) -> None:
+async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status, ir_enabled: bool = False, play_album=None) -> None:
     try:
         from StreamDeck.DeviceManager import DeviceManager
     except ImportError as exc:
@@ -96,6 +96,12 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status, ir_enab
         show(key, label)
 
     loop = asyncio.get_running_loop()
+    from .recents import RecentAlbums, render_recents
+    recents = RecentAlbums()
+    recent_artwork = {}
+    recent_art_retry = {}
+    recent_keys = {}
+    launching_album = False
     display_mode = 0
     display_revision = 0
     spectrum = Spectrum(bands=config.spectrum_bands)
@@ -105,24 +111,43 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status, ir_enab
 
     def toggle_display() -> None:
         nonlocal display_mode, display_revision, last_render_state
-        display_mode = (display_mode + 1) % 4
+        display_mode = (display_mode + 1) % (5 if play_album is not None else 4)
         display_revision += 1
         last_render_state = None
         display.invalidate()
         logger.info("Stream Deck display mode: %s",
                     ("artwork + all info", "artwork + title",
-                     "spectrum + title", "spectrum only")[display_mode])
+                     "spectrum + title", "spectrum only", "recent albums")[display_mode])
 
     key_actions = {key: action for key, action in config.buttons.items()
                    if ir_enabled or action not in {"volume_down", "volume_up"}}
 
+    async def launch_album(album_id):
+        nonlocal launching_album
+        if launching_album:
+            return
+        launching_album = True
+        try:
+            await play_album(album_id)
+        except Exception:
+            logger.exception("Could not launch recent album %s", album_id)
+        finally:
+            launching_album = False
+
+    def handle_key(key):
+        # Resolve the key and page on the event loop, never the USB callback thread.
+        if key_actions.get(key) == "display":
+            toggle_display()
+        elif display_mode == 4:
+            album_id = recent_keys.get(key)
+            if album_id:
+                asyncio.create_task(launch_album(album_id))
+        elif action := key_actions.get(key):
+            asyncio.create_task(dispatch(action))
+
     def on_key_change(_deck, key: int, state: bool) -> None:
-        if state and key_actions.get(key) == "display":
-            loop.call_soon_threadsafe(toggle_display)
-        elif state and (action := key_actions.get(key)):
-            loop.call_soon_threadsafe(
-                lambda: asyncio.create_task(dispatch(action))
-            )
+        if state:
+            loop.call_soon_threadsafe(handle_key, key)
 
     deck.set_key_callback(on_key_change)
 
@@ -151,6 +176,7 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status, ir_enab
             while True:
                 try:
                     status = await get_status()
+                    recents.observe(status)
                     latest_status = status
                     status_error = False
                     playback = status.get("status", "disconnected")
@@ -180,6 +206,25 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status, ir_enab
                     status_error = True
                     logger.warning("Could not poll Qobuz status", exc_info=True)
                 await asyncio.sleep(0.3)
+
+    async def poll_recent_artwork():
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=6)) as http:
+            while True:
+                if display_mode == 4:
+                    for item in list(recents.items[:15]):
+                        url = item.get("album_art_url")
+                        if url and url not in recent_artwork and loop.time() >= recent_art_retry.get(url, 0):
+                            data = await _download_artwork(http, url)
+                            if data is not None:
+                                recent_artwork[url] = data
+                            else:
+                                recent_art_retry[url] = loop.time() + 30
+                    # Bound the in-memory artwork cache to the saved history.
+                    keep = {item.get("album_art_url") for item in recents.items[:15]}
+                    for url in list(recent_artwork):
+                        if url not in keep:
+                            del recent_artwork[url]
+                await asyncio.sleep(0.5)
 
     async def render_feedback() -> None:
         nonlocal last_render_state, title_started_at, last_title
@@ -241,7 +286,17 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status, ir_enab
                 quality = (f"{advertised_bits}/{actual_rate}" if advertised_bits and actual_rate
                            else f"{advertised_bits}/{bit_match.group(2)}" if bit_match
                            else "")
-                if display_mode >= 2:
+                if display_mode == 4:
+                    available = [key for key in range(15) if key_actions.get(key) != "display"]
+                    # Resolve keys from the same album snapshot used for this frame.
+                    items = list(recents.items[:len(available)])
+                    recent_keys.clear()
+                    recent_keys.update({key: item["album_id"] for key, item in zip(available, items)})
+                    tiles = render_recents(deck.key_image_format()["size"], items,
+                                           recent_artwork, key_actions)
+                    await asyncio.to_thread(display.show, tiles)
+                    last_render_state = None
+                elif display_mode >= 2:
                     # Render the latest real PCM FFT, or silence when unavailable.
                     from PIL import Image, ImageDraw, ImageFont
                     from StreamDeck.ImageHelpers import PILHelper
@@ -303,7 +358,7 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status, ir_enab
                                       fitted, font=font, anchor="mm", fill=color)
                         # Volume controls on page 3 follow the configured key positions.
                         for key, action in key_actions.items():
-                            if action not in {"volume_down", "volume_up"}:
+                            if action not in {"volume_down", "volume_up", "light_down", "light_up"}:
                                 continue
                             cx = (key % 5) * (kw + gap) + kw // 2
                             cy = (key // 5) * (kh + gap) + kh // 2
@@ -323,9 +378,13 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status, ir_enab
                             rect(29, 23, 40, 25)
                             if action == "volume_up":
                                 rect(34, 18, 36, 30)
+                            if action in {"light_down", "light_up"}:
+                                from .light_icons import light_icon
+                                glyph = light_icon(action == "light_up", 48 * scale)
                             glyph = glyph.resize((48, 48), Image.Resampling.LANCZOS)
                             overlay.alpha_composite(glyph, (cx - 24, cy - 24))
                         canvas = Image.alpha_composite(canvas.convert("RGBA"), overlay).convert("RGB")
+                    canvas = _page_indicator(canvas, deck.key_image_format()["size"], key_actions)
                     await asyncio.to_thread(display.show, slice_tiles(canvas, deck.key_image_format()["size"]))
                     last_render_state = None
                 elif artwork_bytes is not None:
@@ -337,12 +396,28 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status, ir_enab
                         await asyncio.to_thread(display.show_native, tiles)
                         last_render_state = state
                 else:
+                    from PIL import Image
+                    from StreamDeck.ImageHelpers import PILHelper
+                    size = deck.key_image_format()["size"]
+                    for key, action in key_actions.items():
+                        if action == "display":
+                            # Use a one-key canvas while offline or without artwork.
+                            image = _page_indicator(Image.new("RGB", size), size, {0: "display"})
+                            deck.set_key_image(key, PILHelper.to_native_format(deck, image))
                     show(0, "PREV")
                     show(2, "NEXT")
                     show(5, playback.upper())
                     show(6, str(now_playing.get("title") or "")[:16])
                     show(7, str(now_playing.get("artist") or "")[:16])
                     deck.set_key_image(1, _transport_image(deck, playing))
+                    for key, action in key_actions.items():
+                        if action in {"light_down", "light_up"}:
+                            from .light_icons import light_icon
+                            from StreamDeck.ImageHelpers import PILHelper
+                            image = PILHelper.create_image(deck)
+                            glyph = light_icon(action == "light_up")
+                            image.paste(glyph, ((image.width - 48) // 2, (image.height - 48) // 2), glyph)
+                            deck.set_key_image(key, PILHelper.to_native_format(deck, image))
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -362,19 +437,21 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status, ir_enab
                 frame_count = 0
                 frame_total_seconds = 0.0
                 frame_max_seconds = 0.0
-            target = 1 / config.spectrum_fps if display_mode >= 2 else 0.2
+            target = 1 / config.spectrum_fps if display_mode in (2, 3) else 0.2
             await asyncio.sleep(max(0, target - elapsed))
 
     receiver_task = asyncio.create_task(receive_spectrum(pcm_latest, bands=config.spectrum_bands))
     poll_task = asyncio.create_task(poll_status())
+    recents_task = asyncio.create_task(poll_recent_artwork())
     feedback_task = asyncio.create_task(render_feedback())
     try:
         await asyncio.Event().wait()
     finally:
+        recents_task.cancel()
         feedback_task.cancel()
         poll_task.cancel()
         receiver_task.cancel()
-        await asyncio.gather(feedback_task, poll_task, receiver_task, return_exceptions=True)
+        await asyncio.gather(recents_task, feedback_task, poll_task, receiver_task, return_exceptions=True)
         deck.reset()
         deck.close()
 

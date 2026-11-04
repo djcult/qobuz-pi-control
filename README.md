@@ -473,3 +473,55 @@ listeners before restarting the controller.
 - **Final check:** one remote play/pause press should toggle once, holding
   next/previous should not skip multiple tracks, and each Stream Deck volume
   press should change the CDQ by one step without changing Qobuz playback.
+
+## Litra Beam brightness
+
+Install the ARM64 `litra` CLI as `/usr/local/bin/litra` and configure its udev
+permissions so the service user can run `litra on` without sudo.
+No Rust runtime or additional Python dependencies are needed.
+
+Add these entries to your existing `[streamdeck.buttons]` table in `config.toml`
+(the table replaces the defaults, so keep your other mappings):
+
+```toml
+"13" = "light_down" # Bottom row, button 4
+"14" = "light_up"   # Bottom row, button 5
+```
+
+Sun minus/plus icons appear on pages 1 and 3 and the idle display, replacing the
+quality/time labels on these keys. Pages 2 and 4 retain their clean displays;
+buttons work on every page. Each press adjusts by 5% of maximum lumen output,
+clamped at maximum. Down below minimum switches off; up while off sets minimum
+brightness and switches on. Down while off does nothing. The controller tracks its own level and controls all accessible USB Litra Beams.
+It avoids status queries because some Beams hang on USB reads. After a service
+restart, the first up press sets minimum brightness and turns on; the first down
+press turns off. Changes made with physical buttons are not synchronized.
+Restart `qobuz-pi-control` after editing configuration.
+
+## Recently played albums
+
+The page button now cycles through a fifth page, **Recent Albums**, after the
+four existing artwork/spectrum views. It shows the latest 14 distinct albums
+(one cover per button), reserving the configured page button for navigation.
+Titles have a dark backing; artwork loads in the background. The navigation
+button shows only the triangle, including when history is empty.
+
+History is collected while this controller is running and the configured proxy
+speaker reports `playing`. Listening started from the Qobuz app is included,
+as are albums heard within playlists. Albums move to the front when listening
+returns to them. The latest 50 are saved atomically in
+`~/.local/state/qobuz-pi-control/recent-albums.json` (or under `$XDG_STATE_HOME`),
+so the history survives restarts. Run the service as your normal user to keep
+manual and service history in the same place. It does not import earlier Qobuz
+account history.
+
+Press a cover to request the complete album from its beginning; the page stays
+open. The navigation key shows only the triangle. Other
+keys on this page select albums; volume/light/media mappings still apply on
+the existing pages. Repeated presses are ignored while a launch is in flight.
+
+Requires the proxy update exposing album IDs and
+`POST /api/speakers/{speaker_id}/albums/{album_id}/play`. Select your speaker in
+Qobuz Connect first. **Album launch is experimental until tested on a real
+session**; a rejected or unacknowledged cloud request is logged without changing
+the navigation button or starting a separate local playback queue.

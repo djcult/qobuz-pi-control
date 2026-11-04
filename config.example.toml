@@ -38,6 +38,8 @@ rc_device = "rc2"
 "4" = "display"
 "10" = "volume_down"
 "11" = "volume_up"
+"13" = "light_down"
+"14" = "light_up"
 
 [ir.receive]
 "0x1635" = "toggle"

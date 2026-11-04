@@ -11,6 +11,26 @@ from .display import GAP as ART_GAP_PX, canvas_size, slice_tiles
 # Keep physical-key layout consistent with the controller.
 KEY_ACTIONS = {0: "previous", 1: "toggle", 2: "next"}
 
+def _page_indicator(image, key_size, control_actions):
+    """Overlay a small next-page triangle on each configured display key."""
+    from PIL import Image, ImageDraw
+
+    kw, kh = key_size
+    overlay = Image.new("RGBA", image.size)
+    for key, action in control_actions.items():
+        if action != "display" or not 0 <= key < 15:
+            continue
+        # Keep the marker in the corner, clear of the spectrum title.
+        x = (key % 5) * (kw + ART_GAP_PX) + kw - 23
+        y = (key // 5) * (kh + ART_GAP_PX) + 3
+        badge = Image.new("RGBA", (80, 80))
+        draw = ImageDraw.Draw(badge)
+        draw.rounded_rectangle((0, 0, 79, 79), radius=16, fill=(0, 0, 0, 180))
+        draw.polygon([(28, 16), (28, 64), (60, 40)], fill="white")
+        overlay.alpha_composite(badge.resize((20, 20), Image.Resampling.LANCZOS), (x, y))
+    return Image.alpha_composite(image.convert("RGBA"), overlay).convert("RGB")
+
+
 def _label_image(deck, label: str):
     from PIL import ImageDraw, ImageFont
     from StreamDeck.ImageHelpers import PILHelper
@@ -141,7 +161,10 @@ def _artwork_tiles(deck, artwork: bytes, playing: bool = False,
             def triangle(points):
                 gd.polygon([(round(x * scale), round(y * scale)) for x, y in points],
                            fill="white")
-            if action in ("volume_down", "volume_up"):
+            if action in ("light_down", "light_up"):
+                from .light_icons import light_icon
+                glyph = light_icon(action == "light_up", icon_size * scale)
+            elif action in ("volume_down", "volume_up"):
                 rect(9, 20, 15, 28, radius=1)
                 triangle([(14, 20), (23, 13), (23, 35)])
                 rect(29, 23, 40, 25, radius=1)
@@ -217,34 +240,34 @@ def _artwork_tiles(deck, artwork: bytes, playing: bool = False,
             draw.text((x + key_w // 2, middle_top + key_h // 2),
                       word, font=word_font, anchor="mm", fill=color)
 
-    # Bottom row: legible, bold, single-line labels rendered at 4x resolution.
-    # Text is deliberately truncated rather than reduced to tiny point sizes.
+    # Bottom row: quality on the centre key, with bold fitted text and shading.
     bottom_top = 2 * (key_h + ART_GAP_PX)
-    for index, value in (((13, quality), (14, remaining)) if show_overlays else ()):
+    for index, value in (((12, quality), (14, remaining)) if show_overlays else ()):
+        if control_actions and control_actions.get(index) in {"light_down", "light_up"}:
+            continue
         if not value:
             continue
         x = (index - 10) * (key_w + ART_GAP_PX)
         draw.rounded_rectangle((x + 2, bottom_top + 7, x + key_w - 2,
                                 bottom_top + key_h - 7), radius=8,
-                               fill=(0, 0, 0, 110))
+                               fill=(0, 0, 0, 185 if index == 12 else 110))
         scale = 4
         from PIL import Image as PILImage
         text_layer = PILImage.new("RGBA", (key_w * scale, key_h * scale),
                                   (0, 0, 0, 0))
         td = ImageDraw.Draw(text_layer)
-        try:
-            font = ImageFont.truetype("DejaVuSans-Bold.ttf", 12 * scale)
-        except OSError:
-            font = ImageFont.load_default(size=12 * scale)
         value = str(value).strip()
         available = (key_w - 10) * scale
-        def text_width(candidate):
-            bb = td.textbbox((0, 0), candidate, font=font)
-            return bb[2] - bb[0]
-        if text_width(value) > available:
-            while value and text_width(value + "…") > available:
-                value = value[:-1]
-            value += "…"
+        # Use the largest bold font that fits the whole label, without truncation.
+        maximum_size = min(30, key_h - 18) if index == 12 else 12
+        for size in range(maximum_size, 5, -1):
+            try:
+                font = ImageFont.truetype("DejaVuSans-Bold.ttf", size * scale)
+            except OSError:
+                font = ImageFont.load_default(size=size * scale)
+            bb = td.textbbox((0, 0), value, font=font)
+            if bb[2] - bb[0] <= available and bb[3] - bb[1] <= (key_h - 20) * scale:
+                break
         bounds = td.textbbox((0, 0), value, font=font)
         td.text(((key_w * scale - (bounds[2] - bounds[0])) // 2,
                  (key_h * scale - (bounds[3] - bounds[1])) // 2 - bounds[1]),
@@ -253,4 +276,5 @@ def _artwork_tiles(deck, artwork: bytes, playing: bool = False,
         overlay.alpha_composite(text_layer, (x, bottom_top))
 
     composite = Image.alpha_composite(cover, overlay).convert("RGB")
+    composite = _page_indicator(composite, (key_w, key_h), control_actions or {})
     return [PILHelper.to_native_format(deck, tile) for tile in slice_tiles(composite, (key_w, key_h))]
