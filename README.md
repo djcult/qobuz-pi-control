@@ -516,12 +516,12 @@ manual and service history in the same place. It does not import earlier Qobuz
 account history.
 
 Press a cover to request the complete album from its beginning; the page stays
-open. The navigation key shows **Loading…**, **Sent**, or **Try again**. Other
+open. The navigation key keeps its page label and triangle. Other
 keys on this page select albums; volume/light/media mappings still apply on
 the existing pages. Repeated presses are ignored while a launch is in flight.
 
 Requires the proxy update exposing album IDs and
 `POST /api/speakers/{speaker_id}/albums/{album_id}/play`. Select your speaker in
 Qobuz Connect first. **Album launch is experimental until tested on a real
-session**; a rejected or unacknowledged cloud request is logged and shown as
-**Try again**, rather than starting a separate local playback queue.
+session**; a rejected or unacknowledged cloud request is logged without changing
+the navigation button or starting a separate local playback queue.
