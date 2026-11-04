@@ -1,7 +1,6 @@
 """Control USB Litra Beams through the separately installed litra CLI."""
 
 import asyncio
-import json
 import os
 
 
@@ -9,6 +8,8 @@ class Litra:
     def __init__(self, executable="/usr/local/bin/litra"):
         self.executable = executable
         self.lock = asyncio.Lock()
+        # Beam limits: 30–400 lumens. None means unknown after service startup.
+        self.brightness = None
 
     async def _run(self, *args):
         process = await asyncio.create_subprocess_exec(
@@ -30,23 +31,26 @@ class Litra:
     async def adjust(self, increase):
         # Serialize read/modify/write so rapid presses cannot lose a step.
         async with self.lock:
-            devices = json.loads(await self._run("devices", "--json"))
-            beams = [d for d in devices if d["device_type"] == "beam"]
-            if not beams:
-                raise RuntimeError("No accessible Litra Beam found")
-            for device in beams:
-                target = ("--device-path", device["device_path"])
-                minimum = device["minimum_brightness_in_lumen"]
-                maximum = device["maximum_brightness_in_lumen"]
-                if not device["is_on"]:
-                    if increase:
-                        await self._run("brightness", *target, "--value", str(minimum))
-                        await self._run("on", *target)
-                    continue
-                # Five percentage points of the device's maximum output.
-                step = max(1, round(maximum * 0.05))
-                value = device["brightness_in_lumen"] + (step if increase else -step)
-                if value < minimum:
+            target = ("--device-type", "beam")
+            minimum, maximum, step = 30, 400, 20
+            # Never query hardware: some Beams block indefinitely on HID reads.
+            # Establish a known state on the first press after startup.
+            if self.brightness is None or self.brightness == 0:
+                if increase:
+                    await self._run("brightness", *target, "--value", str(minimum))
+                    await self._run("on", *target)
+                    self.brightness = minimum
+                elif self.brightness is None:
                     await self._run("off", *target)
-                else:
-                    await self._run("brightness", *target, "--value", str(min(value, maximum)))
+                    self.brightness = 0
+                return
+            value = self.brightness + (step if increase else -step)
+            if value < minimum:
+                await self._run("off", *target)
+                self.brightness = 0
+            else:
+                value = min(value, maximum)
+                await self._run("brightness", *target, "--value", str(value))
+                # Explicitly turn on so external power-off doesn't prevent control.
+                await self._run("on", *target)
+                self.brightness = value

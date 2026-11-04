@@ -477,7 +477,7 @@ listeners before restarting the controller.
 ## Litra Beam brightness
 
 Install the ARM64 `litra` CLI as `/usr/local/bin/litra` and configure its udev
-permissions so the service user can run `litra devices --json` without sudo.
+permissions so the service user can run `litra on` without sudo.
 No Rust runtime or additional Python dependencies are needed.
 
 Add these entries to your existing `[streamdeck.buttons]` table in `config.toml`
@@ -492,6 +492,8 @@ Sun minus/plus icons appear on pages 1 and 3 and the idle display, replacing the
 quality/time labels on these keys. Pages 2 and 4 retain their clean displays;
 buttons work on every page. Each press adjusts by 5% of maximum lumen output,
 clamped at maximum. Down below minimum switches off; up while off sets minimum
-brightness and switches on. Down while off does nothing. Current hardware state
-is read on every press, and all accessible USB Litra Beams are controlled.
+brightness and switches on. Down while off does nothing. The controller tracks its own level and controls all accessible USB Litra Beams.
+It avoids status queries because some Beams hang on USB reads. After a service
+restart, the first up press sets minimum brightness and turns on; the first down
+press turns off. Changes made with physical buttons are not synchronized.
 Restart `qobuz-pi-control` after editing configuration.
