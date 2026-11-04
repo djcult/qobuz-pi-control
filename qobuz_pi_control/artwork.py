@@ -11,6 +11,26 @@ from .display import GAP as ART_GAP_PX, canvas_size, slice_tiles
 # Keep physical-key layout consistent with the controller.
 KEY_ACTIONS = {0: "previous", 1: "toggle", 2: "next"}
 
+def _page_indicator(image, key_size, control_actions):
+    """Overlay a small next-page triangle on each configured display key."""
+    from PIL import Image, ImageDraw
+
+    kw, kh = key_size
+    overlay = Image.new("RGBA", image.size)
+    for key, action in control_actions.items():
+        if action != "display" or not 0 <= key < 15:
+            continue
+        # Keep the marker in the corner, clear of the spectrum title.
+        x = (key % 5) * (kw + ART_GAP_PX) + kw - 23
+        y = (key // 5) * (kh + ART_GAP_PX) + 3
+        badge = Image.new("RGBA", (80, 80))
+        draw = ImageDraw.Draw(badge)
+        draw.rounded_rectangle((0, 0, 79, 79), radius=16, fill=(0, 0, 0, 180))
+        draw.polygon([(28, 16), (28, 64), (60, 40)], fill="white")
+        overlay.alpha_composite(badge.resize((20, 20), Image.Resampling.LANCZOS), (x, y))
+    return Image.alpha_composite(image.convert("RGBA"), overlay).convert("RGB")
+
+
 def _label_image(deck, label: str):
     from PIL import ImageDraw, ImageFont
     from StreamDeck.ImageHelpers import PILHelper
@@ -256,4 +276,5 @@ def _artwork_tiles(deck, artwork: bytes, playing: bool = False,
         overlay.alpha_composite(text_layer, (x, bottom_top))
 
     composite = Image.alpha_composite(cover, overlay).convert("RGB")
+    composite = _page_indicator(composite, (key_w, key_h), control_actions or {})
     return [PILHelper.to_native_format(deck, tile) for tile in slice_tiles(composite, (key_w, key_h))]
