@@ -11,7 +11,7 @@ import re
 import aiohttp
 
 from .config import StreamDeckConfig
-from .artwork import _label_image, _artwork_tiles, _transport_image
+from .artwork import _label_image, _artwork_tiles, _transport_image, _page_indicator
 from .spectrum import Spectrum, render_canvas
 from .pcm_receiver import receive_spectrum
 from .display import TileDisplay, slice_tiles
@@ -329,6 +329,7 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status, ir_enab
                             glyph = glyph.resize((48, 48), Image.Resampling.LANCZOS)
                             overlay.alpha_composite(glyph, (cx - 24, cy - 24))
                         canvas = Image.alpha_composite(canvas.convert("RGBA"), overlay).convert("RGB")
+                    canvas = _page_indicator(canvas, deck.key_image_format()["size"], key_actions)
                     await asyncio.to_thread(display.show, slice_tiles(canvas, deck.key_image_format()["size"]))
                     last_render_state = None
                 elif artwork_bytes is not None:
@@ -340,6 +341,14 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status, ir_enab
                         await asyncio.to_thread(display.show_native, tiles)
                         last_render_state = state
                 else:
+                    from PIL import Image
+                    from StreamDeck.ImageHelpers import PILHelper
+                    size = deck.key_image_format()["size"]
+                    for key, action in key_actions.items():
+                        if action == "display":
+                            # Use a one-key canvas while offline or without artwork.
+                            image = _page_indicator(Image.new("RGB", size), size, {0: "display"})
+                            deck.set_key_image(key, PILHelper.to_native_format(deck, image))
                     show(0, "PREV")
                     show(2, "NEXT")
                     show(5, playback.upper())
