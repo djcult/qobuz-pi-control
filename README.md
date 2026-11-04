@@ -497,3 +497,31 @@ It avoids status queries because some Beams hang on USB reads. After a service
 restart, the first up press sets minimum brightness and turns on; the first down
 press turns off. Changes made with physical buttons are not synchronized.
 Restart `qobuz-pi-control` after editing configuration.
+
+## Recently played albums
+
+The page button now cycles through a fifth page, **Recent Albums**, after the
+four existing artwork/spectrum views. It shows the latest 14 distinct albums
+(one cover per button), reserving the configured page button for navigation.
+Titles have a dark backing; artwork loads in the background. An empty history
+shows **No recent albums yet**.
+
+History is collected while this controller is running and the configured proxy
+speaker reports `playing`. Listening started from the Qobuz app is included,
+as are albums heard within playlists. Albums move to the front when listening
+returns to them. The latest 50 are saved atomically in
+`~/.local/state/qobuz-pi-control/recent-albums.json` (or under `$XDG_STATE_HOME`),
+so the history survives restarts. Run the service as your normal user to keep
+manual and service history in the same place. It does not import earlier Qobuz
+account history.
+
+Press a cover to request the complete album from its beginning; the page stays
+open. The navigation key shows **Loading…**, **Sent**, or **Try again**. Other
+keys on this page select albums; volume/light/media mappings still apply on
+the existing pages. Repeated presses are ignored while a launch is in flight.
+
+Requires the proxy update exposing album IDs and
+`POST /api/speakers/{speaker_id}/albums/{album_id}/play`. Select your speaker in
+Qobuz Connect first. **Album launch is experimental until tested on a real
+session**; a rejected or unacknowledged cloud request is logged and shown as
+**Try again**, rather than starting a separate local playback queue.
