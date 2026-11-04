@@ -69,7 +69,7 @@ class RecentAlbums:
         return True
 
 
-def render_recents(key_size, items, artwork, key_actions, message=""):
+def render_recents(key_size, items, artwork, key_actions):
     """One album per key, reserving the configured page-switch keys."""
     from PIL import Image, ImageDraw, ImageFont, ImageOps
     from .artwork import _page_indicator
@@ -111,17 +111,4 @@ def render_recents(key_size, items, artwork, key_actions, message=""):
                 line += "…"
             draw.text((3, kh - 27 + index * 12), line, font=font, fill="white")
         canvas.paste(tile, ((key % 5) * (kw + GAP), (key // 5) * (kh + GAP)))
-    # The navigation key identifies the page and gives launch feedback.
-    for key, action in key_actions.items():
-        if action == "display":
-            draw = ImageDraw.Draw(canvas)
-            x, y = (key % 5) * (kw + GAP), (key // 5) * (kh + GAP)
-            text = message or ("RECENT\nALBUMS" if items else "NO RECENT\nALBUMS YET")
-            draw.multiline_text(
-                (x + 4, y + 27),
-                text,
-                fill="white",
-                font=ImageFont.load_default(size=10),
-                spacing=3,
-            )
     return slice_tiles(_page_indicator(canvas, key_size, key_actions), key_size)
