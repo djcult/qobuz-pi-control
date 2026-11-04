@@ -220,10 +220,9 @@ def _artwork_tiles(deck, artwork: bytes, playing: bool = False,
             draw.text((x + key_w // 2, middle_top + key_h // 2),
                       word, font=word_font, anchor="mm", fill=color)
 
-    # Bottom row: legible, bold, single-line labels rendered at 4x resolution.
-    # Text is deliberately truncated rather than reduced to tiny point sizes.
+    # Bottom row: quality on the centre key, with bold fitted text and shading.
     bottom_top = 2 * (key_h + ART_GAP_PX)
-    for index, value in (((13, quality), (14, remaining)) if show_overlays else ()):
+    for index, value in (((12, quality), (14, remaining)) if show_overlays else ()):
         if control_actions and control_actions.get(index) in {"light_down", "light_up"}:
             continue
         if not value:
@@ -231,25 +230,24 @@ def _artwork_tiles(deck, artwork: bytes, playing: bool = False,
         x = (index - 10) * (key_w + ART_GAP_PX)
         draw.rounded_rectangle((x + 2, bottom_top + 7, x + key_w - 2,
                                 bottom_top + key_h - 7), radius=8,
-                               fill=(0, 0, 0, 110))
+                               fill=(0, 0, 0, 185 if index == 12 else 110))
         scale = 4
         from PIL import Image as PILImage
         text_layer = PILImage.new("RGBA", (key_w * scale, key_h * scale),
                                   (0, 0, 0, 0))
         td = ImageDraw.Draw(text_layer)
-        try:
-            font = ImageFont.truetype("DejaVuSans-Bold.ttf", 12 * scale)
-        except OSError:
-            font = ImageFont.load_default(size=12 * scale)
         value = str(value).strip()
         available = (key_w - 10) * scale
-        def text_width(candidate):
-            bb = td.textbbox((0, 0), candidate, font=font)
-            return bb[2] - bb[0]
-        if text_width(value) > available:
-            while value and text_width(value + "…") > available:
-                value = value[:-1]
-            value += "…"
+        # Use the largest bold font that fits the whole label, without truncation.
+        maximum_size = min(30, key_h - 18) if index == 12 else 12
+        for size in range(maximum_size, 5, -1):
+            try:
+                font = ImageFont.truetype("DejaVuSans-Bold.ttf", size * scale)
+            except OSError:
+                font = ImageFont.load_default(size=size * scale)
+            bb = td.textbbox((0, 0), value, font=font)
+            if bb[2] - bb[0] <= available and bb[3] - bb[1] <= (key_h - 20) * scale:
+                break
         bounds = td.textbbox((0, 0), value, font=font)
         td.text(((key_w * scale - (bounds[2] - bounds[0])) // 2,
                  (key_h * scale - (bounds[3] - bounds[1])) // 2 - bounds[1]),
