@@ -141,7 +141,10 @@ def _artwork_tiles(deck, artwork: bytes, playing: bool = False,
             def triangle(points):
                 gd.polygon([(round(x * scale), round(y * scale)) for x, y in points],
                            fill="white")
-            if action in ("volume_down", "volume_up"):
+            if action in ("light_down", "light_up"):
+                from .light_icons import light_icon
+                glyph = light_icon(action == "light_up", icon_size * scale)
+            elif action in ("volume_down", "volume_up"):
                 rect(9, 20, 15, 28, radius=1)
                 triangle([(14, 20), (23, 13), (23, 35)])
                 rect(29, 23, 40, 25, radius=1)
@@ -221,6 +224,8 @@ def _artwork_tiles(deck, artwork: bytes, playing: bool = False,
     # Text is deliberately truncated rather than reduced to tiny point sizes.
     bottom_top = 2 * (key_h + ART_GAP_PX)
     for index, value in (((13, quality), (14, remaining)) if show_overlays else ()):
+        if control_actions and control_actions.get(index) in {"light_down", "light_up"}:
+            continue
         if not value:
             continue
         x = (index - 10) * (key_w + ART_GAP_PX)

@@ -473,3 +473,25 @@ listeners before restarting the controller.
 - **Final check:** one remote play/pause press should toggle once, holding
   next/previous should not skip multiple tracks, and each Stream Deck volume
   press should change the CDQ by one step without changing Qobuz playback.
+
+## Litra Beam brightness
+
+Install the ARM64 `litra` CLI as `/usr/local/bin/litra` and configure its udev
+permissions so the service user can run `litra devices --json` without sudo.
+No Rust runtime or additional Python dependencies are needed.
+
+Add these entries to your existing `[streamdeck.buttons]` table in `config.toml`
+(the table replaces the defaults, so keep your other mappings):
+
+```toml
+"13" = "light_down" # Bottom row, button 4
+"14" = "light_up"   # Bottom row, button 5
+```
+
+Sun minus/plus icons appear on pages 1 and 3 and the idle display, replacing the
+quality/time labels on these keys. Pages 2 and 4 retain their clean displays;
+buttons work on every page. Each press adjusts by 5% of maximum lumen output,
+clamped at maximum. Down below minimum switches off; up while off sets minimum
+brightness and switches on. Down while off does nothing. Current hardware state
+is read on every press, and all accessible USB Litra Beams are controlled.
+Restart `qobuz-pi-control` after editing configuration.

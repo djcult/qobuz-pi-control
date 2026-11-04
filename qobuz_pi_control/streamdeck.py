@@ -303,7 +303,7 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status, ir_enab
                                       fitted, font=font, anchor="mm", fill=color)
                         # Volume controls on page 3 follow the configured key positions.
                         for key, action in key_actions.items():
-                            if action not in {"volume_down", "volume_up"}:
+                            if action not in {"volume_down", "volume_up", "light_down", "light_up"}:
                                 continue
                             cx = (key % 5) * (kw + gap) + kw // 2
                             cy = (key // 5) * (kh + gap) + kh // 2
@@ -323,6 +323,9 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status, ir_enab
                             rect(29, 23, 40, 25)
                             if action == "volume_up":
                                 rect(34, 18, 36, 30)
+                            if action in {"light_down", "light_up"}:
+                                from .light_icons import light_icon
+                                glyph = light_icon(action == "light_up", 48 * scale)
                             glyph = glyph.resize((48, 48), Image.Resampling.LANCZOS)
                             overlay.alpha_composite(glyph, (cx - 24, cy - 24))
                         canvas = Image.alpha_composite(canvas.convert("RGBA"), overlay).convert("RGB")
@@ -343,6 +346,14 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status, ir_enab
                     show(6, str(now_playing.get("title") or "")[:16])
                     show(7, str(now_playing.get("artist") or "")[:16])
                     deck.set_key_image(1, _transport_image(deck, playing))
+                    for key, action in key_actions.items():
+                        if action in {"light_down", "light_up"}:
+                            from .light_icons import light_icon
+                            from StreamDeck.ImageHelpers import PILHelper
+                            image = PILHelper.create_image(deck)
+                            glyph = light_icon(action == "light_up")
+                            image.paste(glyph, ((image.width - 48) // 2, (image.height - 48) // 2), glyph)
+                            deck.set_key_image(key, PILHelper.to_native_format(deck, image))
             except asyncio.CancelledError:
                 raise
             except Exception:
