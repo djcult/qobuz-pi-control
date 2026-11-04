@@ -101,7 +101,6 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status, ir_enab
     recent_artwork = {}
     recent_art_retry = {}
     recent_keys = {}
-    recent_message = ""
     launching_album = False
     display_mode = 0
     display_revision = 0
@@ -124,16 +123,13 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status, ir_enab
                    if ir_enabled or action not in {"volume_down", "volume_up"}}
 
     async def launch_album(album_id):
-        nonlocal recent_message, launching_album
+        nonlocal launching_album
         if launching_album:
             return
         launching_album = True
-        recent_message = "LOADING…"
         try:
             await play_album(album_id)
-            recent_message = "SENT"
         except Exception:
-            recent_message = "TRY AGAIN"
             logger.exception("Could not launch recent album %s", album_id)
         finally:
             launching_album = False
@@ -297,7 +293,7 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status, ir_enab
                     recent_keys.clear()
                     recent_keys.update({key: item["album_id"] for key, item in zip(available, items)})
                     tiles = render_recents(deck.key_image_format()["size"], items,
-                                           recent_artwork, key_actions, recent_message)
+                                           recent_artwork, key_actions)
                     await asyncio.to_thread(display.show, tiles)
                     last_render_state = None
                 elif display_mode >= 2:
