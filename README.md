@@ -503,8 +503,8 @@ Restart `qobuz-pi-control` after editing configuration.
 The page button now cycles through a fifth page, **Recent Albums**, after the
 four existing artwork/spectrum views. It shows the latest 14 distinct albums
 (one cover per button), reserving the configured page button for navigation.
-Titles have a dark backing; artwork loads in the background. An empty history
-shows **No recent albums yet**.
+Titles have a dark backing; artwork loads in the background. The navigation
+button shows only the triangle, including when history is empty.
 
 History is collected while this controller is running and the configured proxy
 speaker reports `playing`. Listening started from the Qobuz app is included,
@@ -516,7 +516,7 @@ manual and service history in the same place. It does not import earlier Qobuz
 account history.
 
 Press a cover to request the complete album from its beginning; the page stays
-open. The navigation key keeps its page label and triangle. Other
+open. The navigation key shows only the triangle. Other
 keys on this page select albums; volume/light/media mappings still apply on
 the existing pages. Repeated presses are ignored while a launch is in flight.
 
