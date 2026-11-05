@@ -38,6 +38,7 @@ class StreamDeckConfig:
     spectrum_gain: float = 1.4
     spectrum_palette: str = "classic"
     spectrum_bands: int = 64
+    album_hold_seconds: float = 0.7
     buttons: dict[int, str] = field(default_factory=lambda: {0: "previous", 1: "toggle", 2: "next", 4: "display", 10: "volume_down", 11: "volume_up", 13: "light_down", 14: "light_up"})
 
 
@@ -100,6 +101,10 @@ def load_config(path: str | Path) -> Config:
     if spectrum_palette not in ("classic", "retro_orange", "retro_green"):
         raise ValueError("streamdeck.spectrum_palette must be classic, retro_orange or retro_green")
 
+    album_hold_seconds = float(deck_raw.get("album_hold_seconds", 0.7))
+    if not 0.3 <= album_hold_seconds <= 5.0:
+        raise ValueError("streamdeck.album_hold_seconds must be between 0.3 and 5.0")
+
     actions = {"play", "pause", "toggle", "next", "previous", "volume_down", "volume_up"}
     buttons = {int(k): v for k, v in deck_raw.get("buttons", StreamDeckConfig().buttons).items()}
     if any(not 0 <= k < 15 or v not in actions | {"display", "light_down", "light_up"} for k, v in buttons.items()):
@@ -135,6 +140,7 @@ def load_config(path: str | Path) -> Config:
             spectrum_gain=spectrum_gain,
             spectrum_bands=spectrum_bands,
             spectrum_palette=spectrum_palette,
+            album_hold_seconds=album_hold_seconds,
             buttons=buttons,
         ),
     )

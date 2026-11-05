@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -34,14 +35,42 @@ class RecentAlbums:
                         {
                             k: str(item.get(k) or "")
                             for k in ("album_id", "album", "artist", "album_art_url")
-                        }
+                        } | {"pinned": item.get("pinned") is True}
                     )
                     seen.add(item["album_id"])
-            self.items = self.items[:limit]
+            self._trim()
         except FileNotFoundError:
             pass
         except (OSError, ValueError, TypeError):
             logger.warning("Could not load recent albums", exc_info=True)
+
+    def _trim(self) -> None:
+        pinned = [item for item in self.items if item.get("pinned")]
+        recent = [item for item in self.items if not item.get("pinned")]
+        self.items = pinned + recent[:max(0, self.limit - len(pinned))]
+
+    def _save(self) -> None:
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            temporary = self.path.with_suffix(".tmp")
+            temporary.write_text(json.dumps(self.items, ensure_ascii=False))
+            temporary.replace(self.path)
+        except OSError:
+            logger.warning("Could not save recent albums", exc_info=True)
+
+    def toggle_pin(self, album_id: str) -> None:
+        for item in self.items:
+            if item["album_id"] == album_id:
+                self.items.remove(item)
+                item["pinned"] = not item.get("pinned", False)
+                # Keep pins in pinning order; put an unpinned album at the front
+                # of the rotating recents so it remains easy to find.
+                pinned = [entry for entry in self.items if entry.get("pinned")]
+                recent = [entry for entry in self.items if not entry.get("pinned")]
+                self.items = pinned + [item] + recent
+                self._trim()
+                self._save()
+                return
 
     def observe(self, status: dict) -> bool:
         if status.get("status") != "playing":
@@ -54,19 +83,56 @@ class RecentAlbums:
             k: str(meta.get(k) or "")
             for k in ("album_id", "album", "artist", "album_art_url")
         }
-        self.items = [item] + [
-            entry for entry in self.items if entry["album_id"] != album_id
-        ]
-        self.items = self.items[: self.limit]
-        try:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            temporary = self.path.with_suffix(".tmp")
-            temporary.write_text(json.dumps(self.items, ensure_ascii=False))
-            temporary.replace(self.path)
-        except OSError:
-            logger.warning("Could not save recent albums", exc_info=True)
+        existing = next((entry for entry in self.items if entry["album_id"] == album_id), None)
+        if existing is not None and existing.get("pinned"):
+            # Playing a pin updates its metadata without changing pin order.
+            existing.update(item)
+        else:
+            pinned = [entry for entry in self.items if entry.get("pinned")]
+            recent = [entry for entry in self.items
+                      if not entry.get("pinned") and entry["album_id"] != album_id]
+            self.items = pinned + [item] + recent
+        self._trim()
+        self._save()
         self.last_album = album_id
         return True
+
+
+class AlbumKeyPresses:
+    """Resolve an album at key-down, then choose tap or hold on the event loop."""
+
+    def __init__(self, loop, on_tap, on_hold, hold_seconds=0.7):
+        self.loop = loop
+        self.on_tap = on_tap
+        self.on_hold = on_hold
+        self.hold_seconds = hold_seconds
+        self.pending: dict[int, tuple[str, asyncio.TimerHandle | None]] = {}
+
+    def press(self, key: int, album_id: str) -> None:
+        if key in self.pending:
+            return
+        timer = self.loop.call_later(self.hold_seconds, self._hold, key)
+        self.pending[key] = (album_id, timer)
+
+    def _hold(self, key: int) -> None:
+        album_id, _ = self.pending[key]
+        # Leave the consumed press until release, even if the album grid moves.
+        self.pending[key] = (album_id, None)
+        self.on_hold(album_id)
+
+    def release(self, key: int) -> None:
+        press = self.pending.pop(key, None)
+        if press is not None:
+            album_id, timer = press
+            if timer is not None:
+                timer.cancel()
+                self.on_tap(album_id)
+
+    def cancel(self) -> None:
+        for _, timer in self.pending.values():
+            if timer is not None:
+                timer.cancel()
+        self.pending.clear()
 
 
 def render_recents(key_size, items, artwork, key_actions):
@@ -88,6 +154,17 @@ def render_recents(key_size, items, artwork, key_actions):
             except (OSError, ValueError):
                 pass
         draw = ImageDraw.Draw(tile, "RGBA")
+        if item.get("pinned"):
+            # A small pushpin badge stays clear of the album title below.
+            draw.rounded_rectangle((kw - 23, 2, kw - 2, 24), radius=4,
+                                   fill=(0, 0, 0, 210))
+            cx = kw - 12
+            color = (255, 209, 92, 255)
+            draw.rectangle((cx - 4, 6, cx + 4, 8), fill=color)
+            draw.rectangle((cx - 2, 8, cx + 2, 13), fill=color)
+            draw.polygon(((cx - 5, 16), (cx - 2, 12),
+                          (cx + 2, 12), (cx + 5, 16)), fill=color)
+            draw.line((cx, 16, cx, 21), fill=color, width=2)
         draw.rectangle((0, kh - 29, kw, kh), fill=(0, 0, 0, 200))
         try:
             font = ImageFont.truetype("DejaVuSans.ttf", 10)

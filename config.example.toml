@@ -22,6 +22,7 @@ spectrum_delay_ms = 150  # Additional visual delay; tune to match DAC audio (0�
 spectrum_gain = 1.4  # Visual bar height multiplier (0.1–4.0); 1.0 = original
 spectrum_palette = "classic"  # classic, retro_orange, retro_green
 spectrum_bands = 64  # Any integer 1–256; fewer bands give wider bars
+album_hold_seconds = 0.7  # Hold an album cover to pin/unpin (0.3–5.0 seconds)
 
 
 [ir]
