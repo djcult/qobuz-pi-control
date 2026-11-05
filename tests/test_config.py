@@ -22,6 +22,7 @@ brightness = 42
 spectrum_delay_ms = 250
 spectrum_gain = 1.8
 spectrum_bands = 32
+album_hold_seconds = 1.2
 """
     )
     config = load_config(path)
@@ -33,6 +34,7 @@ spectrum_bands = 32
     assert config.streamdeck.spectrum_delay_ms == 250
     assert config.streamdeck.spectrum_gain == 1.8
     assert config.streamdeck.spectrum_bands == 32
+    assert config.streamdeck.album_hold_seconds == 1.2
 
 
 def test_spectrum_delay_defaults_and_validation(tmp_path: Path):
@@ -41,6 +43,7 @@ def test_spectrum_delay_defaults_and_validation(tmp_path: Path):
     assert load_config(path).streamdeck.spectrum_delay_ms == 150
     assert load_config(path).streamdeck.spectrum_gain == 1.4
     assert load_config(path).streamdeck.spectrum_bands == 64
+    assert load_config(path).streamdeck.album_hold_seconds == 0.7
     path.write_text("[streamdeck]\nspectrum_delay_ms = -1\n")
     import pytest
     with pytest.raises(ValueError, match="spectrum_delay_ms"):
@@ -59,4 +62,13 @@ def test_spectrum_band_validation(tmp_path: Path):
     for value in ("0", "-1", "257", "48.5", "true", '"48"'):
         path.write_text(f"[streamdeck]\nspectrum_bands = {value}\n")
         with pytest.raises(ValueError, match="spectrum_bands"):
+            load_config(path)
+
+
+def test_album_hold_validation(tmp_path: Path):
+    import pytest
+    path = tmp_path / "config.toml"
+    for value in ("0.2", "6", "nan", "inf"):
+        path.write_text(f"[streamdeck]\nalbum_hold_seconds = {value}\n")
+        with pytest.raises(ValueError, match="album_hold_seconds"):
             load_config(path)

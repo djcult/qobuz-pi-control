@@ -96,7 +96,7 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status, ir_enab
         show(key, label)
 
     loop = asyncio.get_running_loop()
-    from .recents import RecentAlbums, render_recents
+    from .recents import AlbumKeyPresses, RecentAlbums, render_recents
     recents = RecentAlbums()
     recent_artwork = {}
     recent_art_retry = {}
@@ -111,6 +111,7 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status, ir_enab
 
     def toggle_display() -> None:
         nonlocal display_mode, display_revision, last_render_state
+        album_presses.cancel()
         display_mode = (display_mode + 1) % (5 if play_album is not None else 4)
         display_revision += 1
         last_render_state = None
@@ -134,20 +135,27 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status, ir_enab
         finally:
             launching_album = False
 
-    def handle_key(key):
+    album_presses = AlbumKeyPresses(
+        loop, lambda album_id: asyncio.create_task(launch_album(album_id)),
+        recents.toggle_pin, config.album_hold_seconds,
+    )
+
+    def handle_key(key, state):
         # Resolve the key and page on the event loop, never the USB callback thread.
+        if not state:
+            album_presses.release(key)
+            return
         if key_actions.get(key) == "display":
             toggle_display()
         elif display_mode == 4:
             album_id = recent_keys.get(key)
             if album_id:
-                asyncio.create_task(launch_album(album_id))
+                album_presses.press(key, album_id)
         elif action := key_actions.get(key):
             asyncio.create_task(dispatch(action))
 
     def on_key_change(_deck, key: int, state: bool) -> None:
-        if state:
-            loop.call_soon_threadsafe(handle_key, key)
+        loop.call_soon_threadsafe(handle_key, key, state)
 
     deck.set_key_callback(on_key_change)
 
@@ -447,6 +455,7 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status, ir_enab
     try:
         await asyncio.Event().wait()
     finally:
+        album_presses.cancel()
         recents_task.cancel()
         feedback_task.cancel()
         poll_task.cancel()
