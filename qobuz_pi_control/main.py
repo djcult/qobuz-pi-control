@@ -11,6 +11,7 @@ from .config import load_config
 from .flirc import run_flirc
 from .infrared import Infrared
 from .litra import Litra
+from .home_assistant import HomeAssistantLight
 from .streamdeck import run_streamdeck
 
 logger = logging.getLogger(__name__)
@@ -23,13 +24,16 @@ async def run(config_path: str, no_flirc: bool = False, no_streamdeck: bool = Fa
         config.proxy.base_url,
         config.proxy.speaker_id,
         config.proxy.timeout_seconds,
-    ) as client:
+    ) as client, HomeAssistantLight(config.home_assistant) as office_light:
 
         infrared = Infrared(config.ir)
         litra = Litra()
 
         async def dispatch(action: str) -> None:
             try:
+                if action in {"office_light_down", "office_light_up"}:
+                    await office_light.adjust(action == "office_light_up")
+                    return
                 if action in {"light_down", "light_up"}:
                     await litra.adjust(action == "light_up")
                     return
@@ -52,7 +56,10 @@ async def run(config_path: str, no_flirc: bool = False, no_streamdeck: bool = Fa
         if config.flirc.enabled and not no_flirc:
             tasks.append(asyncio.create_task(run_flirc(config.flirc, dispatch)))
         if config.streamdeck.enabled and not no_streamdeck:
-            tasks.append(asyncio.create_task(run_streamdeck(config.streamdeck, dispatch, client.status, config.ir.enabled, play_album=client.play_album)))
+            tasks.append(asyncio.create_task(run_streamdeck(
+                config.streamdeck, dispatch, client.status, config.ir.enabled,
+                play_album=client.play_album, home_assistant=config.home_assistant,
+            )))
 
         if not tasks:
             raise RuntimeError("No control adapters enabled")

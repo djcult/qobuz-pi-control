@@ -64,7 +64,7 @@ async def _download_artwork(http: aiohttp.ClientSession, url: str):
             logger.warning("Artwork attempt %d failed: %s", attempt + 1, url, exc_info=True)
     return None
 
-async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status, ir_enabled: bool = False, play_album=None) -> None:
+async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status, ir_enabled: bool = False, play_album=None, home_assistant=None) -> None:
     try:
         from StreamDeck.DeviceManager import DeviceManager
     except ImportError as exc:
@@ -112,6 +112,7 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status, ir_enab
     def toggle_display() -> None:
         nonlocal display_mode, display_revision, last_render_state
         album_presses.cancel()
+        light_presses.cancel()
         display_mode = (display_mode + 1) % (5 if play_album is not None else 4)
         display_revision += 1
         last_render_state = None
@@ -140,10 +141,18 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status, ir_enab
         recents.toggle_pin, config.album_hold_seconds,
     )
 
+    from .light_presses import LightKeyPresses
+    light_presses = LightKeyPresses(
+        dispatch,
+        home_assistant.hold_seconds if home_assistant else 0.7,
+        home_assistant.repeat_seconds if home_assistant else 0.3,
+    )
+
     def handle_key(key, state):
         # Resolve the key and page on the event loop, never the USB callback thread.
         if not state:
             album_presses.release(key)
+            light_presses.release(key)
             return
         if key_actions.get(key) == "display":
             toggle_display()
@@ -152,7 +161,10 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status, ir_enab
             if album_id:
                 album_presses.press(key, album_id)
         elif action := key_actions.get(key):
-            asyncio.create_task(dispatch(action))
+            if home_assistant and home_assistant.enabled and action in {"light_down", "light_up"}:
+                light_presses.press(key, action)
+            else:
+                asyncio.create_task(dispatch(action))
 
     def on_key_change(_deck, key: int, state: bool) -> None:
         loop.call_soon_threadsafe(handle_key, key, state)
@@ -456,6 +468,7 @@ async def run_streamdeck(config: StreamDeckConfig, dispatch, get_status, ir_enab
         await asyncio.Event().wait()
     finally:
         album_presses.cancel()
+        await light_presses.close()
         recents_task.cancel()
         feedback_task.cancel()
         poll_task.cancel()

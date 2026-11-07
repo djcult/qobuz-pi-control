@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 
 from qobuz_pi_control import recents, streamdeck
-from qobuz_pi_control.config import StreamDeckConfig
+from qobuz_pi_control.config import HomeAssistantConfig, StreamDeckConfig
 
 
 @pytest.mark.asyncio
@@ -36,10 +36,28 @@ async def test_album_page_callbacks_support_tap_hold_and_page_change(tmp_path, m
     task = asyncio.create_task(streamdeck.run_streamdeck(
         StreamDeckConfig(album_hold_seconds=0.01), dispatch,
         AsyncMock(return_value={"status": "stopped"}), play_album=play_album,
+        home_assistant=HomeAssistantConfig(enabled=True, hold_seconds=0.01, repeat_seconds=0.01),
     ))
     try:
         await asyncio.sleep(0)
         callback = deck.set_key_callback.call_args.args[0]
+        callback(deck, 13, True)
+        callback(deck, 13, False)
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        dispatch.assert_awaited_once_with("light_down")
+        dispatch.reset_mock()
+        callback(deck, 14, True)
+        await asyncio.sleep(0.035)
+        callback(deck, 14, False)
+        await asyncio.sleep(0)
+        assert dispatch.await_count >= 1
+        assert all(call.args == ("office_light_up",) for call in dispatch.await_args_list)
+        count = dispatch.await_count
+        await asyncio.sleep(0.02)
+        assert dispatch.await_count == count
+        dispatch.reset_mock()
+        callback(deck, 13, True)
         for _ in range(4):
             callback(deck, 4, True)
             callback(deck, 4, False)
