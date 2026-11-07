@@ -52,11 +52,23 @@ class IRConfig:
 
 
 @dataclass(slots=True)
+class HomeAssistantConfig:
+    enabled: bool = False
+    base_url: str = "http://homeassistant.local:8123"
+    entity_id: str = "light.shellydimmer2_a4e57cba3bdd"
+    token: str = field(default="", repr=False)
+    hold_seconds: float = 0.7
+    repeat_seconds: float = 0.3
+    step_pct: int = 5
+
+
+@dataclass(slots=True)
 class Config:
     proxy: ProxyConfig
     flirc: FlircConfig
     streamdeck: StreamDeckConfig
     ir: IRConfig = field(default_factory=IRConfig)
+    home_assistant: HomeAssistantConfig = field(default_factory=HomeAssistantConfig)
 
 
 def load_config(path: str | Path) -> Config:
@@ -67,6 +79,16 @@ def load_config(path: str | Path) -> Config:
     flirc_raw = raw.get("flirc", {})
     deck_raw = raw.get("streamdeck", {})
     ir_raw = raw.get("ir", {})
+
+    ha = HomeAssistantConfig(**raw.get("home_assistant", {}))
+    if not 0.3 <= ha.hold_seconds <= 5:
+        raise ValueError("home_assistant.hold_seconds must be between 0.3 and 5")
+    if not 0.1 <= ha.repeat_seconds <= 5:
+        raise ValueError("home_assistant.repeat_seconds must be between 0.1 and 5")
+    if type(ha.step_pct) is not int or not 1 <= ha.step_pct <= 100:
+        raise ValueError("home_assistant.step_pct must be an integer between 1 and 100")
+    if ha.enabled and (not ha.entity_id.startswith("light.") or not ha.base_url.startswith(("http://", "https://"))):
+        raise ValueError("home_assistant requires an HTTP(S) base_url and light entity_id")
 
     reserved = {"enabled", "device", "grab"}
     mappings = {
@@ -119,6 +141,7 @@ def load_config(path: str | Path) -> Config:
     ir_raw = {**ir_raw, "receive": receive, "transmit": transmit}
 
     return Config(
+        home_assistant=ha,
         ir=IRConfig(**ir_raw),
         proxy=ProxyConfig(
             base_url=proxy_raw.get("base_url", "http://127.0.0.1:8689"),

@@ -50,3 +50,13 @@ rc_device = "rc2"
 [ir.transmit]
 volume_down = 0x1611
 volume_up = 0x1610
+
+# Short presses still control the Litra; holds control the office ceiling light.
+[home_assistant]
+enabled = false  # Set true after adding a token
+base_url = "http://homeassistant.local:8123"
+entity_id = "light.shellydimmer2_a4e57cba3bdd"
+token = ""  # Long-lived access token; alternatively set HA_TOKEN in the service environment
+hold_seconds = 0.7
+repeat_seconds = 0.3
+step_pct = 5

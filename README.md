@@ -534,3 +534,41 @@ Requires the proxy update exposing album IDs and
 Qobuz Connect first. **Album launch is experimental until tested on a real
 session**; a rejected or unacknowledged cloud request is logged without changing
 the navigation button or starting a separate local playback queue.
+
+### Office light through Home Assistant
+
+On `album-pinning`-based controllers, the existing Litra buttons (bottom row,
+buttons 4 and 5 by default) can also control the office ceiling light:
+
+- Tap and release: one Litra brightness step.
+- Hold for 0.7 seconds: office light brightness down/up in 5% steps, repeating
+  every 0.3 seconds after each completed request. Release to stop.
+- A hold does not change the Litra. Changing pages cancels pending light holds.
+  On the album shortcuts page these keys remain album shortcuts.
+
+Add this **new top-level section** to your local `config.toml`:
+
+```toml
+[home_assistant]
+enabled = true
+base_url = "http://homeassistant.local:8123"
+entity_id = "light.shellydimmer2_a4e57cba3bdd"
+token = "YOUR_LONG_LIVED_ACCESS_TOKEN"
+hold_seconds = 0.7
+repeat_seconds = 0.3
+step_pct = 5
+```
+
+Create the token in your Home Assistant user profile's **Security → Long-lived
+access tokens** section, then paste it directly into the Pi's local configuration.
+`config.toml` is already ignored by Git. Keep it private (`chmod 600 config.toml`).
+Alternatively omit `token` and set `HA_TOKEN` in the controller service environment;
+a shell export alone does not reach an already running systemd service.
+Restart `qobuz-pi-control` after editing the configuration.
+
+Brightness steps use Home Assistant's current state, including changes from its
+UI or a wall control. Down to zero turns the light off; up from off starts at the
+configured step. Home Assistant must be reachable from the Pi. A request already
+received by Home Assistant may finish after release; no further steps are queued.
+Leave `enabled = false` (or omit the section) for the original immediate Litra
+key-down behavior.
